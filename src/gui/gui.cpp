@@ -3730,6 +3730,7 @@ bool FurnaceGUI::loop() {
   DECLARE_METRIC(memory)
   DECLARE_METRIC(compatFlags)
   DECLARE_METRIC(piano)
+  DECLARE_METRIC(pianoRoll)
   DECLARE_METRIC(notes)
   DECLARE_METRIC(channels)
   DECLARE_METRIC(patManager)
@@ -4339,6 +4340,7 @@ bool FurnaceGUI::loop() {
         IMPORT_CLOSE(statsOpen);
         IMPORT_CLOSE(compatFlagsOpen);
         IMPORT_CLOSE(pianoOpen);
+        IMPORT_CLOSE(pianoRollOpen);
         IMPORT_CLOSE(notesOpen);
         IMPORT_CLOSE(channelsOpen);
         IMPORT_CLOSE(regViewOpen);
@@ -4726,6 +4728,7 @@ bool FurnaceGUI::loop() {
         if (ImGui::MenuItem(_("effect list"),BIND_FOR(GUI_ACTION_WINDOW_EFFECT_LIST),effectListOpen)) effectListOpen=!effectListOpen;
         if (ImGui::MenuItem(_("play/edit controls"),BIND_FOR(GUI_ACTION_WINDOW_EDIT_CONTROLS),editControlsOpen)) editControlsOpen=!editControlsOpen;
         if (ImGui::MenuItem(_("piano/input pad"),BIND_FOR(GUI_ACTION_WINDOW_PIANO),pianoOpen)) pianoOpen=!pianoOpen;
+        if (ImGui::MenuItem(_("piano roll"),NULL,pianoRollOpen)) pianoRollOpen=!pianoRollOpen;
         if (spoilerOpen) if (ImGui::MenuItem(_("spoiler"),NULL,spoilerOpen)) spoilerOpen=!spoilerOpen;
 
         ImGui::EndMenu();
@@ -4979,6 +4982,7 @@ bool FurnaceGUI::loop() {
       MEASURE(memory,drawMemory());
       MEASURE(compatFlags,drawCompatFlags());
       MEASURE(piano,drawPiano());
+      MEASURE(pianoRoll,drawPianoRoll());
       MEASURE(notes,drawNotes());
       MEASURE(channels,drawChannels());
       MEASURE(patManager,drawPatManager());
@@ -8019,6 +8023,7 @@ void FurnaceGUI::syncState() {
 #else
   pianoOpen=e->getConfBool("pianoOpen",false);
 #endif
+  pianoRollOpen=e->getConfBool("pianoRollOpen",false);
   notesOpen=e->getConfBool("notesOpen",false);
   channelsOpen=e->getConfBool("channelsOpen",false);
   patManagerOpen=e->getConfBool("patManagerOpen",false);
@@ -8175,6 +8180,7 @@ void FurnaceGUI::commitState(DivConfig& conf) {
   conf.set("statsOpen",statsOpen);
   conf.set("compatFlagsOpen",compatFlagsOpen);
   conf.set("pianoOpen",pianoOpen);
+  conf.set("pianoRollOpen",pianoRollOpen);
   conf.set("notesOpen",notesOpen);
   conf.set("channelsOpen",channelsOpen);
   conf.set("patManagerOpen",patManagerOpen);
@@ -8556,6 +8562,7 @@ FurnaceGUI::FurnaceGUI():
   statsOpen(false),
   compatFlagsOpen(false),
   pianoOpen(false),
+  pianoRollOpen(false),
   notesOpen(false),
   channelsOpen(false),
   regViewOpen(false),
