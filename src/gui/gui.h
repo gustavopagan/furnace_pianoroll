@@ -2898,6 +2898,7 @@ class FurnaceGUI {
   void drawCompatFlags();
   void drawPiano();
   void drawPianoRoll();
+  struct FurnacePianoRoll* pianoRoll=NULL;
   void drawNotes(bool asChild=false);
   void drawChannels();
   void drawPatManager();
