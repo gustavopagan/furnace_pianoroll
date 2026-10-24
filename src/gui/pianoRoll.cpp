@@ -765,6 +765,23 @@ void FurnaceGUI::drawPianoRoll() {
             if (n.pitch+dp>179) dp=179-n.pitch;
           }
         }
+        if (pr.drag==PR_DRAG_DUPLICATE) {
+          // a channel is monophonic: a copy can't sit on top of its source.
+          // if it would overlap, put the copy right after (or before) the copied block
+          int lo=totalRows, hi=0;
+          for (PRNote& n: notes) {
+            if (!pr.sel.count(n.start)) continue;
+            lo=MIN(lo,n.start);
+            hi=MAX(hi,n.end);
+          }
+          int span=hi-lo;
+          if (span>0 && dr>-span && dr<span) dr=(dr<0)?-span:span;
+          for (PRNote& n: notes) {
+            if (!pr.sel.count(n.start)) continue;
+            if (n.start+dr<0 || n.start+dr>totalRows-1) { dr=0; break; }
+          }
+          if (dr==0) return;
+        }
         bool noop=(pr.drag==PR_DRAG_RESIZE)?(dl==0):(dr==0 && dp==0);
         if (noop) return;
         for (PRNote& n: notes) {

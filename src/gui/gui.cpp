@@ -3393,6 +3393,8 @@ int FurnaceGUI::processEvent(SDL_Event* ev) {
         }
         case GUI_WINDOW_ORDERS: // ignore here
           break;
+        case GUI_WINDOW_PIANO_ROLL: // S/D/E are tool keys here, not piano keys
+          break;
         case GUI_WINDOW_PATTERN:
           if (settings.notePreviewBehavior==1) {
             if (cursor.xFine!=0) break;
