@@ -920,6 +920,7 @@ src/gui/pattern.cpp
 src/gui/piano.cpp
 src/gui/pianoRoll.cpp
 src/gui/pianoRollModel.cpp
+src/gui/pianoRollPrefs.cpp
 src/gui/presets.cpp
 src/gui/regView.cpp
 src/gui/sampleEdit.cpp
@@ -1331,7 +1332,7 @@ target_compile_definitions(${FURNACE} PRIVATE ${DEPENDENCIES_DEFINES})
 # piano roll fork: standalone unit tests for the data model (no GUI, no engine)
 option(PIANO_ROLL_TESTS "Build piano roll model unit tests" OFF)
 if (PIANO_ROLL_TESTS)
-  add_executable(pianoRollModelTest test/pianoRoll/pianoRollModelTest.cpp src/gui/pianoRollModel.cpp)
+  add_executable(pianoRollModelTest test/pianoRoll/pianoRollModelTest.cpp src/gui/pianoRollModel.cpp src/gui/pianoRollPrefs.cpp src/fileutils.cpp)
   target_include_directories(pianoRollModelTest PRIVATE src)
   enable_testing()
   add_test(NAME pianoRollModel COMMAND pianoRollModelTest)

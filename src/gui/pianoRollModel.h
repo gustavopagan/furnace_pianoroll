@@ -93,8 +93,37 @@ int prFindEffect(const short* row, int effectCols, int fx);
 
 // 3.2: rows -> notes
 std::vector<PRNote> prReadChannel(const PRChannelSource& src);
+std::vector<PRNote> prReadRows(int total, int effectCols, const std::function<const short*(int absRow)>& rowAbs);
 
 // how many order positions of this channel use the same pattern as orderPos
 int prPatternUseCount(const PRChannelSource& src, int orderPos);
+
+// ---------------- 3.3: notes -> rows ----------------
+
+// mutable view of one channel by absolute row.
+// getMut may be called for any row 0..total-1 and must return the row that
+// get() will return afterwards (writes are visible to later reads).
+struct PREditCtx {
+  int total, effectCols;
+  std::function<const short*(int absRow)> get;
+  std::function<short*(int absRow)> getMut;
+  PREditCtx(): total(0), effectCols(1) {}
+};
+
+// a note to be written. end is exclusive and clamped to the song length.
+struct PRNoteSpec {
+  int start, end, pitch, ins;
+  PRNoteSpec(int s, int e, int p, int i): start(s), end(e), pitch(p), ins(i) {}
+};
+
+// one edit = remove some notes (identified by their start row), then add some.
+// covers create, delete, move, resize, duplicate, and multi-note versions.
+// endMarker: PR_PITCH_OFF or PR_PITCH_REL (channel preference, 3.5).
+// only note/octave/instrument cells are written; volume and effects are never touched.
+// notes that are not part of the edit keep their length and effective instrument
+// (if removing a note would extend or re-instrument a neighbour, a marker or an
+// explicit instrument is written to keep the sound the same).
+// returns false if nothing was changed.
+bool prApplyEdit(PREditCtx& ctx, const std::vector<int>& removeStarts, const std::vector<PRNoteSpec>& add, int endMarker);
 
 #endif

@@ -1968,6 +1968,11 @@ void FurnaceGUI::doUndo() {
         DivPattern* p=e->curPat[i.chan].getPattern(i.pat,true);
         p->data[i.row][i.col]=i.oldVal;
       }
+      // piano roll "make unique" stores order changes in a pattern edit step
+      for (UndoOrderData& i: us.ord) {
+        e->changeSongP(i.subSong);
+        e->curOrders->ord[i.chan][i.ord]=i.oldVal;
+      }
       if (us.type!=GUI_UNDO_REPLACE) {
         if (!e->isPlaying() || !followPattern) {
           cursor=us.cursor;
@@ -2043,6 +2048,11 @@ void FurnaceGUI::doRedo() {
         e->changeSongP(i.subSong);
         DivPattern* p=e->curPat[i.chan].getPattern(i.pat,true);
         p->data[i.row][i.col]=i.newVal;
+      }
+      // piano roll "make unique" stores order changes in a pattern edit step
+      for (UndoOrderData& i: us.ord) {
+        e->changeSongP(i.subSong);
+        e->curOrders->ord[i.chan][i.ord]=i.newVal;
       }
       if (us.type!=GUI_UNDO_REPLACE) {
         if (!e->isPlaying() || !followPattern) {

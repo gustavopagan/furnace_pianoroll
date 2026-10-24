@@ -2371,6 +2371,7 @@ int FurnaceGUI::save(String path, int dmfVersion) {
   curFileName=path;
   backupLock.unlock();
   modified=false;
+  pianoRollSongSaved(path);
   updateWindowTitle();
   if (!e->getWarnings().empty()) {
     showWarning(e->getWarnings(),GUI_WARN_GENERIC);
@@ -2440,6 +2441,7 @@ int FurnaceGUI::load(String path) {
   curFileName=path;
   backupLock.unlock();
   modified=false;
+  pianoRollSongLoaded(path);
   curNibble=false;
   orderNibble=false;
   orderCursor=-1;

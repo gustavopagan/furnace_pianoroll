@@ -551,7 +551,8 @@ enum FurnaceGUIWindows {
   GUI_WINDOW_MEMORY,
   GUI_WINDOW_CS_PLAYER,
   GUI_WINDOW_USER_PRESETS,
-  GUI_WINDOW_SPOILER
+  GUI_WINDOW_SPOILER,
+  GUI_WINDOW_PIANO_ROLL
 };
 
 enum FurnaceGUIMobileScenes {
@@ -2898,6 +2899,9 @@ class FurnaceGUI {
   void drawCompatFlags();
   void drawPiano();
   void drawPianoRoll();
+  void pianoRollCommit();
+  void pianoRollSongLoaded(const String& path);
+  void pianoRollSongSaved(const String& path);
   struct FurnacePianoRoll* pianoRoll=NULL;
   void drawNotes(bool asChild=false);
   void drawChannels();
