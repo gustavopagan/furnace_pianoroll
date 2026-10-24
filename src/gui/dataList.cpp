@@ -154,13 +154,17 @@ void FurnaceGUI::insListItem(int i, int dir, int asset) {
   bool insPressed=ImGui::IsItemActivated();
   if (insReleased || (!insListDir && insPressed && !settings.draggableDataView)) {
     curIns=i;
+    bool usedByRoll=pianoRollApplyInstrument(i);
     if (!insReleased || insListDir) {
       wavePreviewInit=true;
       updateFMPreview=true;
     }
     lastAssetType=0;
-    if (settings.insFocusesPattern && patternOpen)
+    if (usedByRoll) {
+      nextWindow=GUI_WINDOW_PIANO_ROLL; // keep working in the roll
+    } else if (settings.insFocusesPattern && patternOpen) {
       nextWindow=GUI_WINDOW_PATTERN;
+    }
   }
   if (wantScrollListIns && curIns==i) ImGui::SetScrollHereY();
   if (ImGui::IsItemHovered() && i>=0 && !mobileUI) {

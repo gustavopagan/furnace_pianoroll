@@ -533,6 +533,67 @@ int main() {
 
   // ================= E4: preferências por canal (.fur.roll.json) =================
   {
+    TEST("E5 trocar instrumento: só a coluna de instrumento da linha inicial muda");
+    FakeChan c(16,{0},2);
+    c.note(0,0,C4,1); c.row(0,0)[PR_COL_VOL]=0x30; c.fx(0,0,0,0xed,2);
+    c.note(0,4,PR_PITCH_REL);
+    c.note(0,8,C4+2,1); c.note(0,10,PR_PITCH_OFF);
+    auto s0=c.snap();
+    PREditCtx x=c.ctx();
+    CHECK(prSetInstrument(x,{0},7));
+    auto s1=c.snap();
+    int diffs=0;
+    for (size_t i=0; i<s0.size(); i++) if (s0[i]!=s1[i]) diffs++;
+    CHECK(diffs==1);
+    CHECK(c.row(0,0)[PR_COL_INS]==7);
+    CHECK(c.row(0,0)[PR_COL_VOL]==0x30);
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==2 && n[0].ins==7 && n[0].endType==PR_END_REL && n[1].ins==1);
+  }
+  {
+    TEST("E5 trocar instrumento: a nota que herdava mantém o timbre");
+    FakeChan c(16,{0});
+    c.note(0,0,C4,1); c.note(0,2,PR_PITCH_OFF);
+    c.note(0,4,C4+3);  c.note(0,6,PR_PITCH_OFF);   // herda 1
+    c.note(0,8,C4+5);  c.note(0,10,PR_PITCH_OFF);  // herda 1
+    PREditCtx x=c.ctx();
+    CHECK(prSetInstrument(x,{0},9));
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==3);
+    CHECK(n[0].ins==9);
+    CHECK(n[1].ins==1 && n[2].ins==1);
+  }
+  {
+    TEST("E5 trocar instrumento em várias notas de uma vez, inclusive vizinhas");
+    FakeChan c(16,{0});
+    c.note(0,0,C4,1); c.note(0,2,C4+1); c.note(0,4,C4+2,3); c.note(0,6,PR_PITCH_OFF);
+    PREditCtx x=c.ctx();
+    CHECK(prSetInstrument(x,{0,2},5));
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==3);
+    CHECK(n[0].ins==5 && n[1].ins==5 && n[2].ins==3);
+  }
+  {
+    TEST("E5 trocar instrumento: sem mudança real devolve false; ins<0 e nota inexistente são ignorados");
+    FakeChan c(16,{0});
+    c.note(0,0,C4,4); c.note(0,2,PR_PITCH_OFF);
+    PREditCtx x=c.ctx();
+    CHECK(!prSetInstrument(x,{0},4));
+    CHECK(!prSetInstrument(x,{0},-1));
+    CHECK(!prSetInstrument(x,{5},2));
+    CHECK(c.row(0,0)[PR_COL_INS]==4);
+  }
+  {
+    TEST("E5 trocar instrumento numa pattern repetida (ordem 0 e 2 usam a mesma)");
+    FakeChan c(8,{0,1,0});
+    c.note(0,0,C4,1); c.note(0,2,PR_PITCH_OFF);
+    c.note(1,0,C4+4,6); c.note(1,2,PR_PITCH_OFF);
+    PREditCtx x=c.ctx();
+    CHECK(prSetInstrument(x,{16},3)); // a nota da ordem 2 é a mesma pattern da ordem 0
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==3 && n[0].ins==3 && n[1].ins==6 && n[2].ins==3);
+  }
+  {
     TEST("prefs: ida e volta em JSON (OFF/REL, fold, nomes com acento e aspas)");
     PRPrefs a;
     a.get(0).endRel=true;

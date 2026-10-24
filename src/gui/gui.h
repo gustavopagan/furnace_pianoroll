@@ -2900,6 +2900,7 @@ class FurnaceGUI {
   void drawPiano();
   void drawPianoRoll();
   void pianoRollCommit();
+  bool pianoRollApplyInstrument(int ins);
   void pianoRollSongLoaded(const String& path);
   void pianoRollSongSaved(const String& path);
   struct FurnacePianoRoll* pianoRoll=NULL;

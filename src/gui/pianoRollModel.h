@@ -126,4 +126,10 @@ struct PRNoteSpec {
 // returns false if nothing was changed.
 bool prApplyEdit(PREditCtx& ctx, const std::vector<int>& removeStarts, const std::vector<PRNoteSpec>& add, int endMarker);
 
+// E5: give the notes that start at `starts` the instrument `ins` (written explicitly on the
+// start row). Nothing else is touched: end markers, macro releases, volume and effects stay,
+// and notes that are not in `starts` keep the instrument they were sounding with.
+// returns false if nothing was changed (ins<0, no such note, or already that instrument).
+bool prSetInstrument(PREditCtx& ctx, const std::vector<int>& starts, int ins);
+
 #endif

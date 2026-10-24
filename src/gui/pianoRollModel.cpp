@@ -280,3 +280,37 @@ bool prApplyEdit(PREditCtx& ctx, const std::vector<int>& removeStarts, const std
   }
   return false;
 }
+
+bool prSetInstrument(PREditCtx& ctx, const std::vector<int>& starts, int ins) {
+  if (ins<0) return false;
+  std::vector<PRNote> before=prReadRows(ctx.total,ctx.effectCols,ctx.get);
+  bool changed=false;
+  for (int s: starts) {
+    const PRNote* n=prFindStart(before,s);
+    if (n==NULL) continue;
+    if (n->ins==ins && n->insExplicit) continue;
+    ctx.getMut(s)[PR_COL_INS]=ins;
+    changed=true;
+  }
+  if (!changed) return false;
+  // a note that inherited from a changed note keeps its own sound
+  for (int pass=0; pass<4; pass++) {
+    bool fixed=false;
+    std::vector<PRNote> after=prReadRows(ctx.total,ctx.effectCols,ctx.get);
+    for (const PRNote& b: before) {
+      bool sel=false;
+      for (int s: starts) if (s==b.start) sel=true;
+      if (sel) continue;
+      const PRNote* a=prFindStart(after,b.start);
+      if (a==NULL || a->pitch!=b.pitch) continue;
+      // same cell as a changed note (repeated pattern): it changes with it, by design
+      if (a->insExplicit && a->ins==ins) continue;
+      if (a->ins!=b.ins && b.ins>=0) {
+        ctx.getMut(b.start)[PR_COL_INS]=b.ins;
+        fixed=true;
+      }
+    }
+    if (!fixed) break;
+  }
+  return true;
+}

@@ -81,6 +81,8 @@ struct FurnacePianoRoll {
   std::vector<int> pendRem;
   std::vector<PRNoteSpec> pendAdd;
   std::vector<int> pendSelect; // starts to select after the commit
+  std::vector<int> pendIns;    // E5: starts to give instrument pendInsVal (instead of pendRem/pendAdd)
+  int pendInsVal;
   int repeatMode;
   bool repeatPopup;
   int repeatPopupCount;
@@ -105,7 +107,7 @@ struct FurnacePianoRoll {
     dragMouseRow0(0), dragMouseAx0(0), dragDRow(0), dragDPitch(0), dragDLen(0),
     createRow(0), createPitch(0), lastLen(1),
     repeatMode(PR_REPEAT_ASK), repeatPopup(false), repeatPopupCount(0),
-    previewNote(-999), statusTime(-100.0), prefsLoaded(false) {}
+    pendInsVal(-1), previewNote(-999), statusTime(-100.0), prefsLoaded(false) {}
 };
 
 static PRChannelSource prSourceFor(DivEngine* e, int ch) {
@@ -188,8 +190,12 @@ void FurnaceGUI::pianoRollCommit() {
     memcpy(a.data(),e->curPat[ch].getPattern(e->curOrders->ord[ch][r/patLen],false)->data[r%patLen],DIV_MAX_COLS*sizeof(short));
     return a.data();
   };
-  if (!prApplyEdit(dry,pr.pendRem,pr.pendAdd,endMarker)) {
-    pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear();
+  auto applyPending=[&](PREditCtx& c) -> bool {
+    if (!pr.pendIns.empty()) return prSetInstrument(c,pr.pendIns,pr.pendInsVal);
+    return prApplyEdit(c,pr.pendRem,pr.pendAdd,endMarker);
+  };
+  if (!applyPending(dry)) {
+    pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendIns.clear(); pr.pendInsVal=-1;
     return;
   }
   std::set<int> touched;
@@ -244,7 +250,7 @@ void FurnaceGUI::pianoRollCommit() {
       }
       if (found<0) {
         prSetStatus(pr,_("no free pattern left in this channel to make it unique; nothing was changed"));
-        pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear();
+        pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendIns.clear(); pr.pendInsVal=-1;
         return;
       }
       used[found]=true;
@@ -272,7 +278,7 @@ void FurnaceGUI::pianoRollCommit() {
   real.getMut=[&](int r) -> short* {
     return e->curPat[ch].getPattern(e->curOrders->ord[ch][r/patLen],true)->data[r%patLen];
   };
-  prApplyEdit(real,pr.pendRem,pr.pendAdd,endMarker);
+  applyPending(real);
   size_t histBefore=undoHist.size();
   bool redoWasEmpty=redoHist.empty();
   makeUndo(GUI_UNDO_PATTERN_EDIT,region);
@@ -286,7 +292,27 @@ void FurnaceGUI::pianoRollCommit() {
 
   pr.sel.clear();
   for (int s: pr.pendSelect) pr.sel.insert(s);
-  pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear();
+  pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendIns.clear(); pr.pendInsVal=-1;
+}
+
+// E5: called by the instrument list when an instrument is clicked.
+// returns true if the click was used on the roll's selected notes.
+bool FurnaceGUI::pianoRollApplyInstrument(int ins) {
+  if (!pianoRollOpen || pianoRoll==NULL || ins<0) return false;
+  FurnacePianoRoll& pr=*pianoRoll;
+  if (pr.sel.empty() || pr.drag!=PR_DRAG_NONE) return false;
+  if (pr.chan>=e->getTotalChannelCount()) return false;
+  std::vector<int> starts(pr.sel.begin(),pr.sel.end());
+  pr.pendRem.clear(); pr.pendAdd.clear();
+  pr.pendSelect=starts;
+  pr.pendIns=starts;
+  pr.pendInsVal=ins;
+  size_t n=starts.size();
+  pianoRollCommit();
+  if (!pr.repeatPopup) {
+    prSetStatus(pr,fmt::sprintf(_("instrument %02X applied to %d note(s)"),ins,(int)n));
+  }
+  return true;
 }
 
 // ---------------- the window ----------------
@@ -309,6 +335,10 @@ void FurnaceGUI::drawPianoRoll() {
     pr.sel.clear();
   }
 
+  if (nextWindow==GUI_WINDOW_PIANO_ROLL) {
+    ImGui::SetNextWindowFocus();
+    nextWindow=GUI_WINDOW_NOTHING;
+  }
   ImGui::SetNextWindowSize(ImVec2(900.0f*dpiScale,560.0f*dpiScale),ImGuiCond_FirstUseEver);
   if (!ImGui::Begin("Piano Roll",&pianoRollOpen,globalWinFlags,_("Piano Roll"))) {
     ImGui::End();
@@ -1134,7 +1164,7 @@ void FurnaceGUI::drawPianoRoll() {
 
   // ---------------- repeated pattern popup ----------------
   if (pr.repeatPopup) {
-    ImGui::OpenPopup(_("Repeated pattern##PRRepeatPopup"));
+      ImGui::OpenPopup(_("Repeated pattern##PRRepeatPopup"));
     pr.repeatPopup=false;
   }
   if (ImGui::BeginPopupModal(_("Repeated pattern##PRRepeatPopup"),NULL,ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -1153,7 +1183,7 @@ void FurnaceGUI::drawPianoRoll() {
     }
     ImGui::SameLine();
     if (ImGui::Button(_("Cancel"))) {
-      pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear();
+      pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendIns.clear(); pr.pendInsVal=-1;
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
