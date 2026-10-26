@@ -285,6 +285,10 @@ void FurnaceGUI::doAction(int what) {
     case GUI_ACTION_WINDOW_PIANO:
       nextWindow=GUI_WINDOW_PIANO;
       break;
+    case GUI_ACTION_WINDOW_PIANO_ROLL:
+      pianoRollOpen=true;
+      nextWindow=GUI_WINDOW_PIANO_ROLL;
+      break;
     case GUI_ACTION_WINDOW_NOTES:
       nextWindow=GUI_WINDOW_NOTES;
       break;
@@ -392,6 +396,9 @@ void FurnaceGUI::doAction(int what) {
           break;
         case GUI_WINDOW_PIANO:
           pianoOpen=false;
+          break;
+        case GUI_WINDOW_PIANO_ROLL:
+          pianoRollOpen=false;
           break;
         case GUI_WINDOW_NOTES:
           notesOpen=false;

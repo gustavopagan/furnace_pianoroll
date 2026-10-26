@@ -754,6 +754,7 @@ enum FurnaceGUIActions {
   GUI_ACTION_WINDOW_MEMORY,
   GUI_ACTION_WINDOW_CS_PLAYER,
   GUI_ACTION_WINDOW_USER_PRESETS,
+  GUI_ACTION_WINDOW_PIANO_ROLL,
 
   GUI_ACTION_COLLAPSE_WINDOW,
   GUI_ACTION_CLOSE_WINDOW,
@@ -2902,6 +2903,7 @@ class FurnaceGUI {
   void pianoRollCommit();
   bool pianoRollApplyInstrument(int ins);
   int pianoRollMarker();
+  void pianoRollSaveConf(DivConfig& conf);
   bool pianoRollTransport=false; // "piano roll" toggle next to Poly: roll transport rules + Space play/stop
   bool pianoRollHasPause=false;
   int pianoRollPauseOrd=0, pianoRollPauseRow=0;

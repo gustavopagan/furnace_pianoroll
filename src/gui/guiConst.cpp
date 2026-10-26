@@ -654,6 +654,7 @@ const FurnaceGUIActionDef guiActions[GUI_ACTION_MAX]={
   D("WINDOW_MEMORY", _N("Memory Composition"), 0),
   D("WINDOW_CS_PLAYER", _N("Command Stream Player"), 0),
   D("WINDOW_USER_PRESETS", _N("User Presets"), 0),
+  D("WINDOW_PIANO_ROLL", _N("Piano Roll"), FURKMOD_CMD|FURKMOD_SHIFT|SDLK_r),
 
   D("COLLAPSE_WINDOW", _N("Collapse/expand current window"), 0),
   D("CLOSE_WINDOW", _N("Close current window"), FURKMOD_SHIFT|SDLK_ESCAPE),

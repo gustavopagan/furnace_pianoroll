@@ -2245,6 +2245,7 @@ void FurnaceGUI::drawSettings() {
             drawKeybindSettingsTableRow(GUI_ACTION_WINDOW_EFFECT_LIST);
             drawKeybindSettingsTableRow(GUI_ACTION_WINDOW_DEBUG);
             drawKeybindSettingsTableRow(GUI_ACTION_WINDOW_CS_PLAYER);
+            drawKeybindSettingsTableRow(GUI_ACTION_WINDOW_PIANO_ROLL);
             drawKeybindSettingsTableRow(GUI_ACTION_WINDOW_ABOUT);
             drawKeybindSettingsTableRow(GUI_ACTION_COLLAPSE_WINDOW);
             drawKeybindSettingsTableRow(GUI_ACTION_CLOSE_WINDOW);

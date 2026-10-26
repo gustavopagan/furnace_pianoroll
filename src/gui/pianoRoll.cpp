@@ -407,6 +407,20 @@ bool FurnaceGUI::pianoRollApplyInstrument(int ins) {
 
 // ---------------- the window ----------------
 
+// E9: remember the view options (called from commitState)
+void FurnaceGUI::pianoRollSaveConf(DivConfig& conf) {
+  if (pianoRoll==NULL) return;
+  FurnacePianoRoll& pr=*pianoRoll;
+  conf.set("pianoRollZoomX",pr.zoomX);
+  conf.set("pianoRollZoomY",pr.zoomY);
+  conf.set("pianoRollGhost",pr.ghost);
+  conf.set("pianoRollFollow",pr.follow);
+  conf.set("pianoRollLanes",pr.lanes);
+  conf.set("pianoRollSnap",pr.snap);
+  conf.set("pianoRollTool",pr.tool);
+  conf.set("pianoRollChan",pr.chan);
+}
+
 // E7b: the "piano roll" toggle next to Poly in the play controls
 void FurnaceGUI::drawPianoRollTransportToggle() {
   pushToggleColors(pianoRollTransport);
@@ -468,6 +482,20 @@ void FurnaceGUI::drawPianoRoll() {
   }
   if (pianoRoll==NULL) {
     pianoRoll=new FurnacePianoRoll;
+    // E9: view options remembered between sessions (Furnace config, not the song)
+    FurnacePianoRoll& p0=*pianoRoll;
+    p0.zoomX=CLAMP(e->getConfFloat("pianoRollZoomX",p0.zoomX),2.0f,64.0f);
+    p0.zoomY=CLAMP(e->getConfFloat("pianoRollZoomY",p0.zoomY),4.0f,40.0f);
+    p0.ghost=e->getConfBool("pianoRollGhost",p0.ghost);
+    p0.follow=e->getConfBool("pianoRollFollow",p0.follow);
+    p0.lanes=e->getConfBool("pianoRollLanes",p0.lanes);
+    p0.snap=CLAMP(e->getConfInt("pianoRollSnap",p0.snap),0,2);
+    p0.tool=CLAMP(e->getConfInt("pianoRollTool",p0.tool),0,2);
+    int ch=e->getConfInt("pianoRollChan",-1);
+    if (ch>=0) {
+      p0.chan=ch;
+      p0.firstFrame=false;
+    }
   }
   FurnacePianoRoll& pr=*pianoRoll;
   if (!pr.prefsLoaded) {

@@ -4753,7 +4753,7 @@ bool FurnaceGUI::loop() {
         if (ImGui::MenuItem(_("effect list"),BIND_FOR(GUI_ACTION_WINDOW_EFFECT_LIST),effectListOpen)) effectListOpen=!effectListOpen;
         if (ImGui::MenuItem(_("play/edit controls"),BIND_FOR(GUI_ACTION_WINDOW_EDIT_CONTROLS),editControlsOpen)) editControlsOpen=!editControlsOpen;
         if (ImGui::MenuItem(_("piano/input pad"),BIND_FOR(GUI_ACTION_WINDOW_PIANO),pianoOpen)) pianoOpen=!pianoOpen;
-        if (ImGui::MenuItem(_("piano roll"),NULL,pianoRollOpen)) pianoRollOpen=!pianoRollOpen;
+        if (ImGui::MenuItem(_("piano roll"),BIND_FOR(GUI_ACTION_WINDOW_PIANO_ROLL),pianoRollOpen)) pianoRollOpen=!pianoRollOpen;
         if (spoilerOpen) if (ImGui::MenuItem(_("spoiler"),NULL,spoilerOpen)) spoilerOpen=!spoilerOpen;
 
         ImGui::EndMenu();
@@ -8207,6 +8207,7 @@ void FurnaceGUI::commitState(DivConfig& conf) {
   conf.set("compatFlagsOpen",compatFlagsOpen);
   conf.set("pianoOpen",pianoOpen);
   conf.set("pianoRollOpen",pianoRollOpen);
+  pianoRollSaveConf(conf);
   conf.set("notesOpen",notesOpen);
   conf.set("channelsOpen",channelsOpen);
   conf.set("patManagerOpen",patManagerOpen);
