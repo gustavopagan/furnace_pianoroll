@@ -1,3 +1,17 @@
+# Furnace + piano roll
+
+This fork adds a per-channel **piano roll** window to Furnace v0.6.8.3: draw, move and duplicate notes, edit effects and volumes, see and drag portamento, sub-row timing, row names, and a DAW-style transport with marker and I/O loop. Everything is written as ordinary tracker data, so stock Furnace opens the songs as usual.
+
+Este fork acrescenta uma janela de **piano roll** por canal ao Furnace v0.6.8.3.
+
+![piano roll](doc/piano-roll/img/01-overview.png)
+
+**[Piano roll guide (English)](doc/piano-roll/README.md)** | **[Guia do piano roll (Português)](doc/piano-roll/README.pt-BR.md)** | **[Downloads](https://github.com/gustavopagan/furnace_pianoroll/releases)**
+
+The rest of this page is the original Furnace README.
+
+---
+
 # Furnace (chiptune tracker)
 
 ![screenshot](papers/screenshot3.png)

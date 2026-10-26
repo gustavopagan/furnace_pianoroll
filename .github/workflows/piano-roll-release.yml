@@ -151,4 +151,4 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: ${{ steps.pkg.outputs.file }}
-        body_path: doc/piano-roll/README.md
+        body_path: doc/piano-roll/RELEASE.md
