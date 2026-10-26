@@ -1,11 +1,12 @@
 # piano roll fork: builds Linux, macOS (Intel and Apple Silicon) and Windows packages.
-# runs on pushes to the piano-roll branch, on tags "pr-*" (which also create a GitHub release)
-# and by hand (Actions > Piano roll release > Run workflow).
+# runs on pushes to the piano-roll branch and by hand (Actions > Piano roll release > Run workflow).
+# a push to the "release" branch (or a tag "pr-*") also creates the GitHub release
+# "pr-<version>", with <version> taken from doc/piano-roll/VERSION.
 name: Piano roll release
 
 on:
   push:
-    branches: [piano-roll]
+    branches: [piano-roll, release]
     tags: ['pr-*']
   workflow_dispatch:
 
@@ -15,6 +16,10 @@ defaults:
 
 env:
   BUILD_TYPE: Release
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -42,7 +47,9 @@ jobs:
     - name: Package name
       id: pkg
       run: |
-        name="furnace-piano-roll-${GITHUB_REF_NAME//\//-}"
+        ver="$(tr -d ' \r\n' < doc/piano-roll/VERSION)"
+        echo "tag=pr-${ver}" >> $GITHUB_OUTPUT
+        name="furnace-piano-roll-${ver}"
         case '${{ matrix.config.kind }}' in
           mac) name="${name}-macOS-${{ matrix.config.arch }}"; file="${name}.dmg" ;;
           linux) name="${name}-Linux-${{ matrix.config.arch }}"; file="${name}.tar.gz" ;;
@@ -147,8 +154,11 @@ jobs:
         path: ${{ steps.pkg.outputs.file }}
 
     - name: Release
-      if: ${{ startsWith(github.ref, 'refs/tags/pr-') }}
+      if: ${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/pr-') }}
       uses: softprops/action-gh-release@v2
       with:
+        tag_name: ${{ steps.pkg.outputs.tag }}
+        name: Furnace piano roll ${{ steps.pkg.outputs.tag }}
+        target_commitish: ${{ github.sha }}
         files: ${{ steps.pkg.outputs.file }}
         body_path: doc/piano-roll/RELEASE.md
