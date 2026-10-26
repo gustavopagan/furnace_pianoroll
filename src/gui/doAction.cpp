@@ -107,6 +107,7 @@ void FurnaceGUI::doAction(int what) {
     case GUI_ACTION_PLAY_START:
       e->setOrder(0);
       if (!e->isPlaying()) {
+        pianoRollIgnoreMarker=true; // F5 always plays from the beginning
         play();
       }
       e->setRepeatPattern(false);

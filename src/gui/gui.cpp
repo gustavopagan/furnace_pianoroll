@@ -1176,6 +1176,16 @@ float FurnaceGUI::calcBPM(const DivGroovePattern& speeds, float hz, int vN, int 
 }
 
 void FurnaceGUI::play(int row) {
+  // piano roll fork: Play and Play/Stop start from the roll's marker when there is one
+  if (row<0 && !pianoRollIgnoreMarker) {
+    int mk=pianoRollMarker();
+    if (mk>=0 && e->curSubSong->patLen>0) {
+      curOrder=mk/e->curSubSong->patLen;
+      e->setOrder(curOrder);
+      row=mk%e->curSubSong->patLen;
+    }
+  }
+  pianoRollIgnoreMarker=false;
   if (e->getStreamPlayer()) {
     e->killStream();
   }

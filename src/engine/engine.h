@@ -452,6 +452,9 @@ class DivEngine {
   bool disableStatusOut;
   bool extValuePresent;
   bool repeatPattern;
+  // piano roll fork: loop between two absolute rows of the current subsong (end exclusive)
+  bool rollLoopOn, rollLoopCutPending;
+  int rollLoopStart, rollLoopEnd;
   bool metronome;
   bool exporting;
   bool stopExport;
@@ -999,6 +1002,10 @@ class DivEngine {
 
     // set repeat pattern
     void setRepeatPattern(bool value);
+    // piano roll fork: loop playback between absolute rows [startAbs,endAbs) of the current subsong.
+    // when playback reaches endAbs coming from inside the loop it goes back to startAbs and
+    // every channel gets a note off (like ECxx), so notes do not ring across the loop point.
+    void setRollLoop(bool on, int startAbs, int endAbs);
 
     // has ext value
     bool hasExtValue();
@@ -1405,6 +1412,10 @@ class DivEngine {
       disableStatusOut(false),
       extValuePresent(false),
       repeatPattern(false),
+      rollLoopOn(false),
+      rollLoopCutPending(false),
+      rollLoopStart(0),
+      rollLoopEnd(0),
       metronome(false),
       exporting(false),
       stopExport(false),

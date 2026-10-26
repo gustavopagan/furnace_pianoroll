@@ -2460,6 +2460,15 @@ void DivEngine::setRepeatPattern(bool value) {
   BUSY_END;
 }
 
+void DivEngine::setRollLoop(bool on, int startAbs, int endAbs) {
+  BUSY_BEGIN;
+  rollLoopOn=on && endAbs>startAbs && startAbs>=0;
+  rollLoopStart=startAbs;
+  rollLoopEnd=endAbs;
+  if (!rollLoopOn) rollLoopCutPending=false;
+  BUSY_END;
+}
+
 bool DivEngine::hasExtValue() {
   return extValuePresent;
 }

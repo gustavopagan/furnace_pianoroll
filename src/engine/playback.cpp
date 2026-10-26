@@ -1397,6 +1397,25 @@ void DivEngine::nextRow() {
     playPosLock.unlock();
   }
 
+  // piano roll fork: loop point reached on the previous row: silence every channel
+  // before the first row of the loop plays (same note off as a ECxx cut)
+  if (rollLoopCutPending) {
+    rollLoopCutPending=false;
+    for (int i=0; i<chans; i++) {
+      chan[i].oldNote=chan[i].note;
+      chan[i].keyOn=false;
+      chan[i].keyOff=true;
+      chan[i].portaNote=-1;
+      chan[i].portaSpeed=-1;
+      chan[i].inPorta=false;
+      dispatchCmd(DivCommand(DIV_CMD_HINT_PORTA,i,CLAMP(chan[i].portaNote,-128,127),MAX(chan[i].portaSpeed,0)));
+      dispatchCmd(DivCommand(DIV_CMD_PRE_PORTA,i,false,0));
+      dispatchCmd(DivCommand(DIV_CMD_NOTE_OFF,i));
+      chan[i].releasing=true;
+    }
+  }
+  int rollRowPlayed=curOrder*curSubSong->patLen+curRow;
+
   for (int i=0; i<chans; i++) {
     // try to find pre effects
     processRowPre(i);
@@ -1437,6 +1456,22 @@ void DivEngine::nextRow() {
       nextOrder();
     }
     if (haltOn==DIV_HALT_PATTERN) halted=true;
+  }
+
+  // piano roll fork: loop between two rows
+  if (rollLoopOn && playing && !skipping && !repeatPattern) {
+    int nextAbs=curOrder*curSubSong->patLen+curRow;
+    bool inside=(rollRowPlayed>=rollLoopStart && rollRowPlayed<rollLoopEnd);
+    if (inside && (nextAbs>=rollLoopEnd || nextAbs<=rollRowPlayed)) {
+      int o=rollLoopStart/curSubSong->patLen;
+      int r=rollLoopStart%curSubSong->patLen;
+      if (o<curSubSong->ordersLen) {
+        curOrder=o;
+        curRow=r;
+        rollLoopCutPending=true;
+        memset(walked,0,8192);
+      }
+    }
   }
 
   // new loop detection routine

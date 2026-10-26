@@ -88,6 +88,10 @@ struct FurnacePianoRoll {
   std::set<int> eraseSet;
   ImVec2 rectA, rectB;    // rubber band in content coordinates
   int lastLen;
+  // E7b: transport (DAW style). absolute rows, -1: unset. kept for the session only.
+  int markerRow, loopIn, loopOut;
+  bool loopApplied;
+  int loopAppliedIn, loopAppliedOut;
   int seenOrd, seenRow, seenChan; // E7: last tracker cursor seen
   int revealRow;          // E7: scroll the roll to show this row (-1: none)
   int portaNote;          // start row of the note whose portamento anchor is being dragged
@@ -140,6 +144,7 @@ struct FurnacePianoRoll {
     previewNote(-999), statusTime(-100.0), prefsLoaded(false) {
     portaNote=-1; portaNewSpeed=0;
     seenOrd=-1; seenRow=-1; seenChan=-1; revealRow=-1;
+    markerRow=-1; loopIn=-1; loopOut=-1; loopApplied=false; loopAppliedIn=-1; loopAppliedOut=-1;
     focusRow=-1; laneFx=-1; lanes=true; focusFxField=false; focusValField=false;
     laneDrag=0; laneLastRow=-1; laneLastVal=0;
     addFxCode[0]=0;
@@ -384,8 +389,23 @@ bool FurnaceGUI::pianoRollApplyInstrument(int ins) {
 
 // ---------------- the window ----------------
 
+// E7b: Play / Play-Stop start from here when the roll has a marker (see FurnaceGUI::play)
+int FurnaceGUI::pianoRollMarker() {
+  if (!pianoRollOpen || pianoRoll==NULL) return -1;
+  int total=e->curSubSong->patLen*e->curSubSong->ordersLen;
+  if (pianoRoll->markerRow<0 || pianoRoll->markerRow>=total) return -1;
+  return pianoRoll->markerRow;
+}
+
 void FurnaceGUI::drawPianoRoll() {
-  if (!pianoRollOpen) return;
+  if (!pianoRollOpen) {
+    // the loop belongs to the roll: closing the window turns it off
+    if (pianoRoll!=NULL && pianoRoll->loopApplied) {
+      e->setRollLoop(false,0,0);
+      pianoRoll->loopApplied=false;
+    }
+    return;
+  }
   if (pianoRoll==NULL) {
     pianoRoll=new FurnacePianoRoll;
   }
@@ -526,6 +546,33 @@ void FurnaceGUI::drawPianoRoll() {
   ImGui::Checkbox(_("Lanes"),&pr.lanes);
   if (ImGui::IsItemHovered()) ImGui::SetTooltip(_("show the volume and effect lanes under the roll"));
 
+  // E7b: transport state and its clear button
+  ImGui::SameLine();
+  {
+    bool any=(pr.markerRow>=0 || pr.loopIn>=0 || pr.loopOut>=0);
+    int pl=MAX(1,(int)sub->patLen);
+    if (!any) ImGui::BeginDisabled();
+    if (ImGui::Button(_("Clear transport"))) {
+      pr.markerRow=-1;
+      pr.loopIn=-1;
+      pr.loopOut=-1;
+    }
+    if (!any) ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s",_("remove the start marker and the loop\n(click the ruler above the roll to set the marker; I and O set the loop)"));
+    if (pr.markerRow>=0) {
+      ImGui::SameLine();
+      ImGui::Text(_("start %.2X:%.2X"),pr.markerRow/pl,pr.markerRow%pl);
+    }
+    if (pr.loopIn>=0) {
+      ImGui::SameLine();
+      if (pr.loopOut>pr.loopIn) {
+        ImGui::Text(_("loop %.2X:%.2X - %.2X:%.2X"),pr.loopIn/pl,pr.loopIn%pl,pr.loopOut/pl,pr.loopOut%pl);
+      } else {
+        ImGui::Text(_("loop %.2X:%.2X - (press O)"),pr.loopIn/pl,pr.loopIn%pl);
+      }
+    }
+  }
+
   // status message (only while there is something to say)
   ImGui::SameLine();
   bool showStatus=(ImGui::GetTime()-pr.statusTime)<6.0;
@@ -534,7 +581,7 @@ void FurnaceGUI::drawPianoRoll() {
     ImGui::TextUnformatted(pr.status.c_str());
     ImGui::PopStyleColor();
   } else {
-    ImGui::TextDisabled("%s",_("S/D/E: tools, Shift+drag: duplicate, double-click: add effect, Del: delete, Ctrl+A: select all"));
+    ImGui::TextDisabled("%s",_("S/D/E: tools, Shift+drag: duplicate, double-click: add effect, Del: delete, Ctrl+A: select all, I/O: loop"));
   }
 
   // ---------------- data ----------------
@@ -543,6 +590,20 @@ void FurnaceGUI::drawPianoRoll() {
   int totalRows=patLen*ordersLen;
   PRChannelSource src=prSourceFor(e,pr.chan);
   std::vector<PRNote> notes=prReadChannel(src);
+
+  // E7b: keep the transport inside the song and hand the loop to the engine
+  if (pr.markerRow>=totalRows) pr.markerRow=-1;
+  if (pr.loopIn>=totalRows) pr.loopIn=-1;
+  if (pr.loopOut>totalRows) pr.loopOut=totalRows;
+  {
+    bool want=(pr.loopIn>=0 && pr.loopOut>pr.loopIn);
+    if (want!=pr.loopApplied || (want && (pr.loopIn!=pr.loopAppliedIn || pr.loopOut!=pr.loopAppliedOut))) {
+      e->setRollLoop(want,pr.loopIn,pr.loopOut);
+      pr.loopApplied=want;
+      pr.loopAppliedIn=pr.loopIn;
+      pr.loopAppliedOut=pr.loopOut;
+    }
+  }
 
   // E7: roll -> tracker. selecting a note puts the tracker cursor on its first row and selects
   // its rows in the pattern (within one order). not while playing: moving the order would jump.
@@ -663,6 +724,21 @@ void FurnaceGUI::drawPianoRoll() {
       if (ImGui::IsKeyPressed(ImGuiKey_D,false)) pr.tool=PR_TOOL_DRAW;
       if (ImGui::IsKeyPressed(ImGuiKey_E,false)) pr.tool=PR_TOOL_ERASE;
       if (ImGui::IsKeyPressed(ImGuiKey_Escape,false)) pr.sel.clear();
+      // E7b: loop in / out at the marker
+      if (ImGui::IsKeyPressed(ImGuiKey_I,false) && pr.markerRow>=0) {
+        pr.loopIn=pr.markerRow;
+        if (pr.loopOut>=0 && pr.loopOut<=pr.loopIn) pr.loopOut=-1;
+      }
+      if (ImGui::IsKeyPressed(ImGuiKey_O,false) && pr.markerRow>=0) {
+        if (pr.loopIn<0) {
+          if (pr.markerRow>0) { pr.loopIn=0; pr.loopOut=pr.markerRow; }
+        } else if (pr.markerRow>pr.loopIn) {
+          pr.loopOut=pr.markerRow;
+        } else if (pr.markerRow<pr.loopIn) {
+          pr.loopOut=pr.loopIn;
+          pr.loopIn=pr.markerRow;
+        }
+      }
       if ((ImGui::IsKeyPressed(ImGuiKey_Delete,false) || ImGui::IsKeyPressed(ImGuiKey_Backspace,false)) && !pr.sel.empty()) {
         pr.pendRem.assign(pr.sel.begin(),pr.sel.end());
         pr.pendOp=nullptr;
@@ -1052,21 +1128,22 @@ void FurnaceGUI::drawPianoRoll() {
   // layout
   ImVec2 areaPos=ImGui::GetCursorScreenPos();
   ImVec2 avail=ImGui::GetContentRegionAvail();
-  if (avail.x<kbW+32 || avail.y<arrH+32) {
+  float rulerH=ImGui::GetFontSize()+4.0f*dpiScale;
+  if (avail.x<kbW+32 || avail.y<arrH+rulerH+32) {
     ImGui::End();
     return;
   }
-  ImVec2 gridPos=ImVec2(areaPos.x+kbW,areaPos.y+arrH);
+  ImVec2 gridPos=ImVec2(areaPos.x+kbW,areaPos.y+arrH+rulerH);
   float laneGap=3.0f*dpiScale;
   float laneVolH=pr.lanes?52.0f*dpiScale:0.0f;
   float laneFxH=pr.lanes?60.0f*dpiScale:0.0f;
   float lanesH=pr.lanes?(laneVolH+laneFxH+laneGap*2.0f):0.0f;
-  if (avail.y-arrH-lanesH<48.0f*dpiScale) {
+  if (avail.y-arrH-rulerH-lanesH<48.0f*dpiScale) {
     // too short for the lanes: hide them this frame
     laneVolH=laneFxH=lanesH=0.0f;
   }
   bool lanesShown=(lanesH>0.0f);
-  ImVec2 gridSize=ImVec2(avail.x-kbW,avail.y-arrH-lanesH);
+  ImVec2 gridSize=ImVec2(avail.x-kbW,avail.y-arrH-rulerH-lanesH);
 
   // ---------------- grid (scrolling child) ----------------
   ImGui::SetCursorScreenPos(gridPos);
@@ -1791,6 +1868,23 @@ void FurnaceGUI::drawPianoRoll() {
       dl->AddRect(r0,r1,ImGui::GetColorU32(ImVec4(0.4f,0.6f,1.0f,0.8f)));
     }
 
+    // E7b: loop band and start marker
+    {
+      ImU32 colLoop=ImGui::GetColorU32(ImVec4(0.35f,0.75f,1.0f,0.08f));
+      ImU32 colLoopEdge=ImGui::GetColorU32(ImVec4(0.35f,0.75f,1.0f,0.70f));
+      if (pr.loopIn>=0) {
+        int lo=(pr.loopOut>pr.loopIn)?pr.loopOut:totalRows;
+        float lx0=org.x+pr.loopIn*zX, lx1=org.x+lo*zX;
+        dl->AddRectFilled(ImVec2(MAX(lx0,viewMin.x),viewMin.y),ImVec2(MIN(lx1,viewMax.x),viewMax.y),colLoop);
+        dl->AddLine(ImVec2(lx0,viewMin.y),ImVec2(lx0,viewMax.y),colLoopEdge,1.5f*dpiScale);
+        if (pr.loopOut>pr.loopIn) dl->AddLine(ImVec2(lx1,viewMin.y),ImVec2(lx1,viewMax.y),colLoopEdge,1.5f*dpiScale);
+      }
+      if (pr.markerRow>=0) {
+        float mx=org.x+pr.markerRow*zX;
+        dl->AddLine(ImVec2(mx,viewMin.y),ImVec2(mx,viewMax.y),ImGui::GetColorU32(ImVec4(1.0f,1.0f,1.0f,0.55f)),1.0f*dpiScale);
+      }
+    }
+
     if (playX>=0) {
       float x=org.x+playX;
       ImVec4 ph=uiColors[GUI_COLOR_PATTERN_PLAY_HEAD];
@@ -1798,6 +1892,73 @@ void FurnaceGUI::drawPianoRoll() {
     }
   }
   ImGui::EndChild();
+
+  // ---------------- ruler (E7b): click to set the start marker ----------------
+  {
+    ImDrawList* dl=ImGui::GetWindowDrawList();
+    ImVec2 r0=ImVec2(gridPos.x,gridPos.y-rulerH);
+    ImVec2 r1=ImVec2(gridPos.x+gridSize.x-ImGui::GetStyle().ScrollbarSize,gridPos.y-1.0f);
+    ImGui::SetCursorScreenPos(r0);
+    ImGui::InvisibleButton("##PRRuler",ImVec2(MAX(1.0f,r1.x-r0.x),MAX(1.0f,r1.y-r0.y)));
+    bool rHov=ImGui::IsItemHovered();
+    bool rClick=ImGui::IsItemClicked(ImGuiMouseButton_Left);
+    float zXl=pr.zoomX*dpiScale;
+    float orgX=r0.x-pr.scrollX;
+    int ra=MAX(0,(int)floorf(pr.scrollX/zXl));
+    int rb=MIN(totalRows,(int)ceilf((pr.scrollX+(r1.x-r0.x))/zXl)+1);
+    int hlAr=MAX(1,(int)sub->hilightA), hlBr=MAX(1,(int)sub->hilightB);
+    dl->PushClipRect(r0,r1,true);
+    dl->AddRectFilled(r0,r1,ImGui::GetColorU32(ImGuiCol_FrameBgHovered,0.55f));
+    // loop band
+    if (pr.loopIn>=0) {
+      int lo=(pr.loopOut>pr.loopIn)?pr.loopOut:totalRows;
+      ImU32 c=ImGui::GetColorU32(ImVec4(0.35f,0.75f,1.0f,(pr.loopOut>pr.loopIn)?0.45f:0.20f));
+      dl->AddRectFilled(ImVec2(orgX+pr.loopIn*zXl,r0.y),ImVec2(orgX+lo*zXl,r1.y),c);
+    }
+    ImU32 colTick=ImGui::GetColorU32(ImVec4(1,1,1,0.35f));
+    ImU32 colTickB=ImGui::GetColorU32(ImVec4(1,1,1,0.75f));
+    float lastLabel=-1000.0f;
+    for (int r=ra; r<=rb; r++) {
+      float x=orgX+r*zXl;
+      int rr=r%patLen;
+      float h=(r1.y-r0.y);
+      if (rr==0 || (rr%hlBr)==0) {
+        dl->AddLine(ImVec2(x,r0.y),ImVec2(x,r1.y),colTickB);
+        char buf[16];
+        snprintf(buf,15,"%.2X:%.2X",r/patLen,rr);
+        float tw=ImGui::CalcTextSize(buf).x;
+        if (x-lastLabel>tw+8.0f*dpiScale) {
+          dl->AddText(ImVec2(x+2.0f*dpiScale,r0.y+1.0f*dpiScale),ImGui::GetColorU32(ImGuiCol_Text),buf);
+          lastLabel=x;
+        }
+      } else if ((rr%hlAr)==0) {
+        dl->AddLine(ImVec2(x,r1.y-h*0.5f),ImVec2(x,r1.y),colTick);
+      } else if (zXl>=6.0f*dpiScale) {
+        dl->AddLine(ImVec2(x,r1.y-h*0.25f),ImVec2(x,r1.y),colTick);
+      }
+    }
+    // marker: a downward triangle
+    if (pr.markerRow>=0) {
+      float mx=orgX+pr.markerRow*zXl;
+      float t=6.0f*dpiScale;
+      dl->AddTriangleFilled(ImVec2(mx-t,r0.y),ImVec2(mx+t,r0.y),ImVec2(mx,r1.y),ImGui::GetColorU32(ImVec4(1,1,1,0.95f)));
+    }
+    dl->PopClipRect();
+    if (rHov) {
+      int r=CLAMP((int)floorf((ImGui::GetIO().MousePos.x-orgX)/zXl),0,MAX(0,totalRows-1));
+      ImGui::SetTooltip(_("%.2X:%.2X\nclick: put the start marker here (Play starts from it)\nI / O: loop from / to the marker"),r/patLen,r%patLen);
+      if (rClick) {
+        pr.markerRow=r;
+        ImGui::SetWindowFocus();
+        if (e->isPlaying()) {
+          // like a DAW: clicking the ruler while playing jumps there
+          play();
+        } else {
+          syncTracker(r,r+1);
+        }
+      }
+    }
+  }
 
   // ---------------- arrangement bar ----------------
   {
