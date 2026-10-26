@@ -393,8 +393,12 @@ bool FurnaceGUI::pianoRollApplyInstrument(int ins) {
 int FurnaceGUI::pianoRollMarker() {
   if (!pianoRollOpen || pianoRoll==NULL) return -1;
   int total=e->curSubSong->patLen*e->curSubSong->ordersLen;
-  if (pianoRoll->markerRow<0 || pianoRoll->markerRow>=total) return -1;
-  return pianoRoll->markerRow;
+  FurnacePianoRoll& pr=*pianoRoll;
+  bool loop=(pr.loopIn>=0 && pr.loopOut>pr.loopIn && pr.loopIn<total);
+  // with a loop, play starts inside it: at the marker if the marker is in the loop, else at its start
+  if (loop && (pr.markerRow<pr.loopIn || pr.markerRow>=pr.loopOut)) return pr.loopIn;
+  if (pr.markerRow<0 || pr.markerRow>=total) return -1;
+  return pr.markerRow;
 }
 
 void FurnaceGUI::drawPianoRoll() {
