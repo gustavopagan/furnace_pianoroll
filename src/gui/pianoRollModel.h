@@ -132,4 +132,31 @@ bool prApplyEdit(PREditCtx& ctx, const std::vector<int>& removeStarts, const std
 // returns false if nothing was changed (ins<0, no such note, or already that instrument).
 bool prSetInstrument(PREditCtx& ctx, const std::vector<int>& starts, int ins);
 
+// ---------------- E6: effects and volume (3.6, 3.7) ----------------
+// effects belong to the row, not to the note. these never touch note/octave/instrument.
+
+struct PRFx {
+  int col, fx, val; // col 0..effectCols-1; val -1 = no value written
+  PRFx(int c, int f, int v): col(c), fx(f), val(v) {}
+};
+
+// non-empty effect columns of a row (a column with only a value and no effect is listed with fx -1)
+std::vector<PRFx> prRowEffects(const short* row, int effectCols);
+
+// write effect fx with value val (0..255) on each row:
+// - if the row already has fx in a column, that column's value changes (first such column);
+// - otherwise the first empty column (no effect and no value) gets it;
+// - otherwise the row is left alone and added to *refused (if not NULL).
+// returns true if anything changed.
+bool prSetEffect(PREditCtx& ctx, const std::vector<int>& rows, int fx, int val, std::vector<int>* refused);
+
+// only rows that already have fx get the new value. returns true if anything changed.
+bool prSetEffectValueWherePresent(PREditCtx& ctx, const std::vector<int>& rows, int fx, int val);
+
+// remove every column holding fx on each row (effect and value). returns true if anything changed.
+bool prRemoveEffect(PREditCtx& ctx, const std::vector<int>& rows, int fx);
+
+// volume column: rowVal maps absolute row -> value (-1 clears). returns true if anything changed.
+bool prSetVolume(PREditCtx& ctx, const std::vector<std::pair<int,int>>& rowVal);
+
 #endif

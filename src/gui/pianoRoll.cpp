@@ -30,6 +30,8 @@
 #include <algorithm>
 #include <set>
 #include <array>
+#include <map>
+#include <functional>
 
 enum PRTool {
   PR_TOOL_SELECT=0,
@@ -45,6 +47,15 @@ enum PRDrag {
   PR_DRAG_CREATE,
   PR_DRAG_RECT,
   PR_DRAG_ERASE
+};
+
+enum PRLaneDrag {
+  PR_LANE_NONE=0,
+  PR_LANE_VOL_PAINT,
+  PR_LANE_VOL_ERASE,
+  PR_LANE_FX_PAINT,
+  PR_LANE_FX_ERASE,
+  PR_LANE_FX_PICK
 };
 
 enum PRRepeatMode {
@@ -81,8 +92,22 @@ struct FurnacePianoRoll {
   std::vector<int> pendRem;
   std::vector<PRNoteSpec> pendAdd;
   std::vector<int> pendSelect; // starts to select after the commit
-  std::vector<int> pendIns;    // E5: starts to give instrument pendInsVal (instead of pendRem/pendAdd)
-  int pendInsVal;
+  // E5/E6: any other edit (instrument, effects, volume) as a function on the channel.
+  // it runs twice (dry run, then for real), so it must only depend on what it captured.
+  std::function<bool(PREditCtx&)> pendOp;
+  std::vector<int> pendRefused; // rows an effect edit could not write (no free column)
+
+  // E6: note panel and lanes
+  int focusRow;           // row shown in the note panel when no note is selected (-1: none)
+  int laneFx;             // effect shown in the effect lane (-1: most used in the channel)
+  bool lanes;             // show the volume and effect lanes
+  bool focusFxField;      // give keyboard focus to the "add effect" field on the next frame
+  bool focusValField;
+  int laneDrag;           // PR_LANE_*
+  std::map<int,int> lanePaint; // row -> value being painted (-1: erase)
+  int laneLastRow;
+  float laneLastVal;
+  char addFxCode[8], addFxVal[8];
   int repeatMode;
   bool repeatPopup;
   int repeatPopupCount;
@@ -107,7 +132,12 @@ struct FurnacePianoRoll {
     dragMouseRow0(0), dragMouseAx0(0), dragDRow(0), dragDPitch(0), dragDLen(0),
     createRow(0), createPitch(0), lastLen(1),
     repeatMode(PR_REPEAT_ASK), repeatPopup(false), repeatPopupCount(0),
-    pendInsVal(-1), previewNote(-999), statusTime(-100.0), prefsLoaded(false) {}
+    previewNote(-999), statusTime(-100.0), prefsLoaded(false) {
+    focusRow=-1; laneFx=-1; lanes=true; focusFxField=false; focusValField=false;
+    laneDrag=0; laneLastRow=-1; laneLastVal=0;
+    addFxCode[0]=0;
+    addFxVal[0]=0;
+  }
 };
 
 static PRChannelSource prSourceFor(DivEngine* e, int ch) {
@@ -119,6 +149,33 @@ static PRChannelSource prSourceFor(DivEngine* e, int ch) {
   src.patAt=[s,ch](int p) -> int { return s->orders.ord[ch][p]; };
   src.rowAt=[s,ch](int pat, int r) -> const short* { return s->pat[ch].getPattern(pat,false)->data[r]; };
   return src;
+}
+
+// an edited note never runs over a note that is not part of the edit:
+// it ends where the next such note (or the next edited note) starts
+static void prClipAdds(const std::vector<PRNote>& notes, const std::vector<int>& rem, std::vector<PRNoteSpec>& add) {
+  for (PRNoteSpec& sp: add) {
+    int lim=sp.end;
+    for (const PRNote& n: notes) {
+      bool removed=std::find(rem.begin(),rem.end(),n.start)!=rem.end();
+      if (removed) continue;
+      if (n.start>sp.start && n.start<lim) lim=n.start;
+    }
+    for (PRNoteSpec& o: add) {
+      if (o.start>sp.start && o.start<lim) lim=o.start;
+    }
+    sp.end=lim;
+  }
+}
+
+static bool prParseOrdRow(const char* s, int patLen, int totalRows, int& out) {
+  unsigned int o=0, r=0;
+  if (sscanf(s,"%x:%x",&o,&r)!=2) return false;
+  if ((int)r>=patLen) return false;
+  int a=(int)o*patLen+(int)r;
+  if (a<0 || a>=totalRows) return false;
+  out=a;
+  return true;
 }
 
 static bool prIsBlackKey(int pitch) {
@@ -191,11 +248,12 @@ void FurnaceGUI::pianoRollCommit() {
     return a.data();
   };
   auto applyPending=[&](PREditCtx& c) -> bool {
-    if (!pr.pendIns.empty()) return prSetInstrument(c,pr.pendIns,pr.pendInsVal);
+    pr.pendRefused.clear();
+    if (pr.pendOp) return pr.pendOp(c);
     return prApplyEdit(c,pr.pendRem,pr.pendAdd,endMarker);
   };
   if (!applyPending(dry)) {
-    pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendIns.clear(); pr.pendInsVal=-1;
+    pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendOp=nullptr;
     return;
   }
   std::set<int> touched;
@@ -250,7 +308,7 @@ void FurnaceGUI::pianoRollCommit() {
       }
       if (found<0) {
         prSetStatus(pr,_("no free pattern left in this channel to make it unique; nothing was changed"));
-        pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendIns.clear(); pr.pendInsVal=-1;
+        pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendOp=nullptr;
         return;
       }
       used[found]=true;
@@ -289,10 +347,13 @@ void FurnaceGUI::pianoRollCommit() {
   if (!uniq.empty()) {
     prSetStatus(pr,fmt::sprintf(_("made %d pattern(s) unique"),(int)uniq.size()));
   }
+  if (!pr.pendRefused.empty()) {
+    prSetStatus(pr,fmt::sprintf(_("%d row(s) had no free effect column and were left alone (add effect columns to this channel in the pattern view)"),(int)pr.pendRefused.size()));
+  }
 
   pr.sel.clear();
   for (int s: pr.pendSelect) pr.sel.insert(s);
-  pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendIns.clear(); pr.pendInsVal=-1;
+  pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendOp=nullptr;
 }
 
 // E5: called by the instrument list when an instrument is clicked.
@@ -305,8 +366,7 @@ bool FurnaceGUI::pianoRollApplyInstrument(int ins) {
   std::vector<int> starts(pr.sel.begin(),pr.sel.end());
   pr.pendRem.clear(); pr.pendAdd.clear();
   pr.pendSelect=starts;
-  pr.pendIns=starts;
-  pr.pendInsVal=ins;
+  pr.pendOp=[starts,ins](PREditCtx& c) -> bool { return prSetInstrument(c,starts,ins); };
   size_t n=starts.size();
   pianoRollCommit();
   if (!pr.repeatPopup) {
@@ -435,6 +495,10 @@ void FurnaceGUI::drawPianoRoll() {
     if (ImGui::IsItemHovered()) ImGui::SetTooltip(_("what to do when an edit falls in a pattern used in more than one order position"));
   }
 
+  ImGui::SameLine();
+  ImGui::Checkbox(_("Lanes"),&pr.lanes);
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip(_("show the volume and effect lanes under the roll"));
+
   // status message (only while there is something to say)
   ImGui::SameLine();
   bool showStatus=(ImGui::GetTime()-pr.statusTime)<6.0;
@@ -443,7 +507,7 @@ void FurnaceGUI::drawPianoRoll() {
     ImGui::TextUnformatted(pr.status.c_str());
     ImGui::PopStyleColor();
   } else {
-    ImGui::TextDisabled("%s",_("S/D/E: tools, Shift+drag: duplicate, Del: delete, Ctrl+A: select all"));
+    ImGui::TextDisabled("%s",_("S/D/E: tools, Shift+drag: duplicate, double-click: add effect, Del: delete, Ctrl+A: select all"));
   }
 
   // ---------------- data ----------------
@@ -564,6 +628,374 @@ void FurnaceGUI::drawPianoRoll() {
     }
   }
 
+  // ---------------- note panel (4.1 item 2, 3.7) ----------------
+  // shows the selected notes, or the row picked in the effect lane when no note is selected.
+  // every edit here is one undo step and goes through pianoRollCommit (repeated patterns included).
+  std::vector<const PRNote*> selNotes;
+  for (const PRNote& n: notes) if (pr.sel.count(n.start)) selNotes.push_back(&n);
+  if (!selNotes.empty()) pr.focusRow=-1;
+  if (pr.focusRow>=totalRows) pr.focusRow=-1;
+  std::vector<int> tRows;
+  if (!selNotes.empty()) {
+    for (const PRNote* n: selNotes) tRows.push_back(n->start);
+  } else if (pr.focusRow>=0) {
+    tRows.push_back(pr.focusRow);
+  }
+  auto rowPtr=[&](int r) -> const short* {
+    return src.rowAt(src.patAt(r/patLen),r%patLen);
+  };
+  FurnacePianoRoll* prp=&pr;
+  int effectCols=MIN(DIV_MAX_EFFECTS,MAX(1,(int)sub->pat[pr.chan].effectCols));
+  auto queueOp=[&](std::function<bool(PREditCtx&)> op) {
+    pr.pendRem.clear();
+    pr.pendAdd.clear();
+    pr.pendSelect.assign(pr.sel.begin(),pr.sel.end());
+    pr.pendOp=op;
+    pianoRollCommit();
+  };
+  auto queueNotes=[&](std::vector<int> rem, std::vector<PRNoteSpec> add, std::vector<int> selAfter) {
+    prClipAdds(notes,rem,add);
+    pr.pendOp=nullptr;
+    pr.pendRem=rem;
+    pr.pendAdd=add;
+    pr.pendSelect=selAfter;
+    pianoRollCommit();
+  };
+  auto fxDesc=[&](int fx) -> const char* {
+    const char* d=e->getEffectDesc((unsigned char)fx,pr.chan);
+    if (d==NULL) return _("(not valid on this chip)");
+    if (strlen(d)>6) return d+6;
+    return d;
+  };
+
+  ImGui::Separator();
+  float panelY0=ImGui::GetCursorPosY();
+  float fieldW2=ImGui::CalcTextSize("00:00").x+ImGui::GetStyle().FramePadding.x*2.0f+4.0f*dpiScale;
+  float fieldHex=ImGui::CalcTextSize("000").x+ImGui::GetStyle().FramePadding.x*2.0f;
+  ImGuiInputTextFlags enterFlags=ImGuiInputTextFlags_EnterReturnsTrue|ImGuiInputTextFlags_AutoSelectAll;
+
+  // line 1: note fields
+  ImGui::AlignTextToFramePadding();
+  if (!selNotes.empty()) {
+    const PRNote& f=*selNotes[0];
+    bool one=(selNotes.size()==1);
+    if (one) {
+      ImGui::TextUnformatted(_("Note"));
+    } else {
+      ImGui::Text(_("%d notes"),(int)selNotes.size());
+    }
+
+    // start
+    ImGui::SameLine();
+    ImGui::TextUnformatted(_("Start"));
+    ImGui::SameLine();
+    if (one) {
+      char buf[16];
+      snprintf(buf,15,"%.2X:%.2X",f.start/patLen,f.start%patLen);
+      ImGui::SetNextItemWidth(fieldW2);
+      if (ImGui::InputText("##PRStart",buf,15,enterFlags)) {
+        int ns=-1;
+        if (prParseOrdRow(buf,patLen,totalRows,ns) && ns!=f.start) {
+          int len=f.end-f.start;
+          queueNotes({f.start},{PRNoteSpec(ns,MIN(totalRows,ns+len),f.pitch,f.ins)},{ns});
+        } else if (ns<0) {
+          prSetStatus(pr,_("type the position as order:row in hex, e.g. 01:0C"));
+        }
+      }
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip(_("order:row (hex), Enter to move the note"));
+    } else {
+      ImGui::TextDisabled("...");
+    }
+
+    // end
+    ImGui::SameLine();
+    ImGui::TextUnformatted(_("End"));
+    ImGui::SameLine();
+    if (one) {
+      char buf[16];
+      snprintf(buf,15,"%.2X:%.2X",f.end/patLen,f.end%patLen);
+      if (f.end>=totalRows) snprintf(buf,15,"--:--");
+      ImGui::SetNextItemWidth(fieldW2);
+      if (ImGui::InputText("##PREnd",buf,15,enterFlags)) {
+        int ne=-1;
+        unsigned int o=0, r=0;
+        // the end may be the row right after the last one (end of song)
+        if (sscanf(buf,"%x:%x",&o,&r)==2 && (int)r<patLen) ne=(int)o*patLen+(int)r;
+        if (ne==totalRows || (ne>f.start && ne<totalRows)) {
+          if (ne!=f.end) queueNotes({f.start},{PRNoteSpec(f.start,ne,f.pitch,f.ins)},{f.start});
+        } else {
+          prSetStatus(pr,_("the end must come after the start (order:row in hex)"));
+        }
+      }
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip(_("first row after the note (order:row, hex), Enter to apply"));
+    } else {
+      ImGui::TextDisabled("...");
+    }
+
+    // length (rows, decimal), applies to all
+    ImGui::SameLine();
+    ImGui::TextUnformatted(_("Length"));
+    ImGui::SameLine();
+    {
+      bool same=true;
+      for (const PRNote* n: selNotes) if (n->end-n->start!=f.end-f.start) same=false;
+      char buf[16];
+      if (same) snprintf(buf,15,"%d",f.end-f.start); else snprintf(buf,15,"...");
+      ImGui::SetNextItemWidth(ImGui::CalcTextSize("00000").x+ImGui::GetStyle().FramePadding.x*2.0f);
+      if (ImGui::InputText("##PRLen",buf,15,enterFlags|ImGuiInputTextFlags_CharsDecimal)) {
+        int nl=atoi(buf);
+        if (nl>=1) {
+          std::vector<int> rem;
+          std::vector<PRNoteSpec> add;
+          std::vector<int> after;
+          for (const PRNote* n: selNotes) {
+            rem.push_back(n->start);
+            add.push_back(PRNoteSpec(n->start,MIN(totalRows,n->start+nl),n->pitch,n->ins));
+            after.push_back(n->start);
+          }
+          queueNotes(rem,add,after);
+          pr.lastLen=nl;
+        }
+      }
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip(_("length in rows; Enter applies it to every selected note\n(a note never runs over the next note that is not selected)"));
+    }
+
+    // pitch: name + transpose buttons, applies to all
+    ImGui::SameLine();
+    ImGui::TextUnformatted(_("Pitch"));
+    ImGui::SameLine();
+    {
+      bool same=true;
+      for (const PRNote* n: selNotes) if (n->pitch!=f.pitch) same=false;
+      if (same) {
+        short nn,oo;
+        prEncodePitch(f.pitch,nn,oo);
+        ImGui::TextUnformatted(noteName(nn,oo));
+      } else {
+        ImGui::TextUnformatted("...");
+      }
+      const int steps[4]={-12,-1,1,12};
+      const char* labels[4]={"-12##PRTr0","-1##PRTr1","+1##PRTr2","+12##PRTr3"};
+      for (int i=0; i<4; i++) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton(labels[i])) {
+          int d=steps[i];
+          bool ok=true;
+          for (const PRNote* n: selNotes) if (n->pitch+d<0 || n->pitch+d>179) ok=false;
+          if (ok) {
+            std::vector<int> rem;
+            std::vector<PRNoteSpec> add;
+            std::vector<int> after;
+            for (const PRNote* n: selNotes) {
+              rem.push_back(n->start);
+              add.push_back(PRNoteSpec(n->start,n->end,n->pitch+d,n->ins));
+              after.push_back(n->start);
+            }
+            queueNotes(rem,add,after);
+          } else {
+            prSetStatus(pr,_("a selected note would leave the pitch range; nothing was changed"));
+          }
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(_("transpose the selected notes"));
+      }
+    }
+
+    // instrument (E5 operation), applies to all
+    ImGui::SameLine();
+    ImGui::TextUnformatted(_("Instrument"));
+    ImGui::SameLine();
+    {
+      bool same=true;
+      for (const PRNote* n: selNotes) if (n->ins!=f.ins) same=false;
+      String prev="...";
+      if (same) {
+        if (f.ins>=0 && f.ins<(int)e->song.ins.size()) {
+          prev=fmt::sprintf("%.2X: %s",f.ins,e->song.ins[f.ins]->name);
+        } else if (f.ins>=0) {
+          prev=fmt::sprintf("%.2X: %s",f.ins,_("(missing)"));
+        } else {
+          prev=_("none");
+        }
+        if (one && !f.insExplicit) prev+=_(" (inherited)");
+      }
+      ImGui::SetNextItemWidth(220.0f*dpiScale);
+      if (ImGui::BeginCombo("##PRIns",prev.c_str(),ImGuiComboFlags_HeightLarge)) {
+        for (int i=0; i<(int)e->song.ins.size(); i++) {
+          ImGui::PushID(i);
+          bool cur=same && f.ins==i;
+          if (ImGui::Selectable(fmt::sprintf("%.2X: %s",i,e->song.ins[i]->name).c_str(),cur)) {
+            std::vector<int> starts=tRows;
+            int ins=i;
+            queueOp([starts,ins](PREditCtx& c) -> bool { return prSetInstrument(c,starts,ins); });
+          }
+          ImGui::PopID();
+        }
+        ImGui::EndCombo();
+      }
+    }
+  } else if (pr.focusRow>=0) {
+    ImGui::Text(_("Row %.2X:%.2X (no note starts here)"),pr.focusRow/patLen,pr.focusRow%patLen);
+    short v=rowPtr(pr.focusRow)[PR_COL_VOL];
+    if (v>=0) {
+      ImGui::SameLine();
+      ImGui::TextDisabled(_("volume %.2X"),v);
+    }
+  } else {
+    ImGui::TextDisabled("%s",_("Select a note to see and edit it here, or click a row in the effect lane below."));
+  }
+
+  // line 2: effects of the rows (start row of each selected note, or the picked row)
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextUnformatted(_("Effects"));
+  if (!tRows.empty()) {
+    struct FxSum {
+      int count, val;
+      bool same;
+      FxSum(): count(0), val(-1), same(true) {}
+    };
+    std::map<int,FxSum> fxs;
+    for (int r: tRows) {
+      std::set<int> seen;
+      for (const PRFx& x: prRowEffects(rowPtr(r),effectCols)) {
+        if (x.fx<0 || seen.count(x.fx)) continue;
+        seen.insert(x.fx);
+        FxSum& fsum=fxs[x.fx];
+        if (fsum.count==0) {
+          fsum.val=x.val;
+        } else if (fsum.val!=x.val) {
+          fsum.same=false;
+        }
+        fsum.count++;
+      }
+    }
+    for (auto& it: fxs) {
+      int fx=it.first;
+      FxSum& fsum=it.second;
+      ImGui::PushID(fx+1000);
+      ImGui::SameLine();
+      ImGui::PushStyleColor(ImGuiCol_Text,uiColors[fxColors[fx]]);
+      ImGui::Text("%.2X",fx);
+      ImGui::PopStyleColor();
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%.2X: %s\n%s",fx,fxDesc(fx),(fsum.count<(int)tRows.size())?fmt::sprintf(_("present on %d of %d rows"),fsum.count,(int)tRows.size()).c_str():"");
+      }
+      ImGui::SameLine(0,2.0f*dpiScale);
+      char vbuf[16];
+      if (fsum.same && fsum.val>=0) snprintf(vbuf,15,"%.2X",fsum.val);
+      else if (fsum.same) snprintf(vbuf,7,"..");
+      else snprintf(vbuf,7,"..");
+      ImGui::SetNextItemWidth(fieldHex);
+      if (ImGui::InputText("##PRFxV",vbuf,7,enterFlags|ImGuiInputTextFlags_CharsHexadecimal|ImGuiInputTextFlags_CharsUppercase)) {
+        unsigned int v=0;
+        if (sscanf(vbuf,"%x",&v)==1 && v<=255) {
+          std::vector<int> rows=tRows;
+          int ival=(int)v;
+          queueOp([rows,fx,ival](PREditCtx& c) -> bool { return prSetEffectValueWherePresent(c,rows,fx,ival); });
+        }
+      }
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip(_("value (hex); Enter changes it on every row that has this effect"));
+      if (fsum.count<(int)tRows.size()) {
+        ImGui::SameLine(0,2.0f*dpiScale);
+        if (ImGui::SmallButton(fmt::sprintf("+%d",(int)tRows.size()-fsum.count).c_str())) {
+          std::vector<int> missing;
+          for (int r: tRows) {
+            bool has=false;
+            for (const PRFx& x: prRowEffects(rowPtr(r),effectCols)) if (x.fx==fx) has=true;
+            if (!has) missing.push_back(r);
+          }
+          int ival=(fsum.val>=0)?fsum.val:0;
+          queueOp([missing,fx,ival,prp](PREditCtx& c) -> bool { return prSetEffect(c,missing,fx,ival,&prp->pendRefused); });
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(_("add this effect to the rows that don't have it"));
+      }
+      ImGui::SameLine(0,2.0f*dpiScale);
+      if (ImGui::SmallButton("x")) {
+        std::vector<int> rows=tRows;
+        queueOp([rows,fx](PREditCtx& c) -> bool { return prRemoveEffect(c,rows,fx); });
+      }
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip(_("remove this effect from these rows"));
+      ImGui::PopID();
+    }
+    if (fxs.empty()) {
+      ImGui::SameLine();
+      ImGui::TextDisabled("%s",_("none"));
+    }
+
+    // add an effect to all the rows
+    ImGui::SameLine();
+    ImGui::Dummy(ImVec2(8.0f*dpiScale,1));
+    ImGui::SameLine();
+    ImGui::TextUnformatted(_("Add"));
+    ImGui::SameLine();
+    if (pr.focusFxField) {
+      ImGui::SetKeyboardFocusHere();
+      pr.focusFxField=false;
+    }
+    ImGui::SetNextItemWidth(fieldHex);
+    bool addEnter=ImGui::InputText("##PRAddFx",pr.addFxCode,3,enterFlags|ImGuiInputTextFlags_CharsHexadecimal|ImGuiInputTextFlags_CharsUppercase);
+    if (ImGui::IsItemHovered()) {
+      unsigned int c=0;
+      if (sscanf(pr.addFxCode,"%x",&c)==1 && c<=255) {
+        ImGui::SetTooltip("%.2X: %s",c,fxDesc((int)c));
+      } else {
+        ImGui::SetTooltip("%s",_("effect (hex)"));
+      }
+    }
+    ImGui::SameLine(0,1.0f*dpiScale);
+    if (ImGui::ArrowButton("##PRAddFxList",ImGuiDir_Down)) ImGui::OpenPopup("PRAddFxPopup");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s",_("list of effects for this chip"));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(360.0f*dpiScale,0),ImVec2(720.0f*dpiScale,420.0f*dpiScale));
+    if (ImGui::BeginPopup("PRAddFxPopup")) {
+      for (int i=0; i<256; i++) {
+        const char* d=e->getEffectDesc((unsigned char)i,pr.chan);
+        if (d==NULL) continue;
+        ImGui::PushID(i);
+        ImGui::PushStyleColor(ImGuiCol_Text,uiColors[fxColors[i]]);
+        if (ImGui::Selectable(fmt::sprintf("%.2X  %s",i,(strlen(d)>6)?(d+6):d).c_str())) {
+          snprintf(pr.addFxCode,3,"%.2X",i);
+          pr.focusFxField=false;
+        }
+        ImGui::PopStyleColor();
+        ImGui::PopID();
+      }
+      ImGui::EndPopup();
+    }
+    ImGui::SameLine();
+    if (pr.focusValField) {
+      ImGui::SetKeyboardFocusHere();
+      pr.focusValField=false;
+    }
+    ImGui::SetNextItemWidth(fieldHex);
+    bool valEnter=ImGui::InputText("##PRAddVal",pr.addFxVal,3,enterFlags|ImGuiInputTextFlags_CharsHexadecimal|ImGuiInputTextFlags_CharsUppercase);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s",_("value (hex)"));
+    ImGui::SameLine();
+    bool apply=ImGui::SmallButton(_("Apply##PRAddApply"));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip(_("write this effect on the %d row(s) above\n(same effect already there: only its value changes; no free column: the row is skipped)"),(int)tRows.size());
+    if (apply || valEnter || addEnter) {
+      unsigned int c=0, v=0;
+      bool okC=(sscanf(pr.addFxCode,"%x",&c)==1 && c<=255);
+      bool okV=(pr.addFxVal[0]==0) || (sscanf(pr.addFxVal,"%x",&v)==1 && v<=255);
+      if (addEnter && pr.addFxVal[0]==0) {
+        // Enter on the effect field: move on to the value
+        pr.focusValField=true;
+      } else if (okC && okV) {
+        std::vector<int> rows=tRows;
+        int fx=(int)c, ival=(int)v;
+        queueOp([rows,fx,ival,prp](PREditCtx& cc) -> bool { return prSetEffect(cc,rows,fx,ival,&prp->pendRefused); });
+      } else {
+        prSetStatus(pr,_("type the effect and the value in hex, e.g. 08 and F0"));
+      }
+    }
+  } else {
+    ImGui::SameLine();
+    ImGui::TextDisabled("-");
+  }
+  // keep the panel height stable whatever it shows
+  {
+    float want=panelY0+ImGui::GetFrameHeightWithSpacing()*2.0f;
+    if (ImGui::GetCursorPosY()<want) ImGui::SetCursorPosY(want);
+  }
+
   // layout
   ImVec2 areaPos=ImGui::GetCursorScreenPos();
   ImVec2 avail=ImGui::GetContentRegionAvail();
@@ -572,7 +1004,16 @@ void FurnaceGUI::drawPianoRoll() {
     return;
   }
   ImVec2 gridPos=ImVec2(areaPos.x+kbW,areaPos.y+arrH);
-  ImVec2 gridSize=ImVec2(avail.x-kbW,avail.y-arrH);
+  float laneGap=3.0f*dpiScale;
+  float laneVolH=pr.lanes?52.0f*dpiScale:0.0f;
+  float laneFxH=pr.lanes?60.0f*dpiScale:0.0f;
+  float lanesH=pr.lanes?(laneVolH+laneFxH+laneGap*2.0f):0.0f;
+  if (avail.y-arrH-lanesH<48.0f*dpiScale) {
+    // too short for the lanes: hide them this frame
+    laneVolH=laneFxH=lanesH=0.0f;
+  }
+  bool lanesShown=(lanesH>0.0f);
+  ImVec2 gridSize=ImVec2(avail.x-kbW,avail.y-arrH-lanesH);
 
   // ---------------- grid (scrolling child) ----------------
   ImGui::SetCursorScreenPos(gridPos);
@@ -702,6 +1143,8 @@ void FurnaceGUI::drawPianoRoll() {
     // mouse down
     if (gridHovered && pr.drag==PR_DRAG_NONE && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       ImGui::SetWindowFocus();
+      pr.focusRow=-1;
+      if (hitIdx>=0 && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) pr.focusFxField=true;
       pr.dragMouseRow0=mRowF;
       pr.dragMouseAx0=mAxF;
       pr.dragDRow=0; pr.dragDPitch=0; pr.dragDLen=0;
@@ -830,20 +1273,7 @@ void FurnaceGUI::drawPianoRoll() {
         dAdd.push_back(PRNoteSpec(pr.createRow,MIN(totalRows,pr.createRow+len),pr.createPitch,curIns));
         dSel.push_back(pr.createRow);
       }
-      // an edited note never runs over a note that is not part of the edit:
-      // it ends where the next such note (or the next edited note) starts
-      for (PRNoteSpec& sp: dAdd) {
-        int lim=sp.end;
-        for (PRNote& n: notes) {
-          bool removed=std::find(dRem.begin(),dRem.end(),n.start)!=dRem.end();
-          if (removed) continue;
-          if (n.start>sp.start && n.start<lim) lim=n.start;
-        }
-        for (PRNoteSpec& o: dAdd) {
-          if (o.start>sp.start && o.start<lim) lim=o.start;
-        }
-        sp.end=lim;
-      }
+      prClipAdds(notes,dRem,dAdd);
     };
     buildDragEdit();
 
@@ -1159,6 +1589,342 @@ void FurnaceGUI::drawPianoRoll() {
     dl->PopClipRect();
   }
 
+  // ---------------- lanes: volume (3.6) and effect (3.7) ----------------
+  if (lanesShown) {
+    ImDrawList* dl=ImGui::GetWindowDrawList();
+    ImGuiIO& io=ImGui::GetIO();
+    float sbW=ImGui::GetStyle().ScrollbarSize;
+    float lx0=gridPos.x, lx1=gridPos.x+gridSize.x-sbW;
+    float zXl=pr.zoomX*dpiScale;
+    float orgX=lx0-pr.scrollX;
+    int r0=MAX(0,(int)floorf(pr.scrollX/zXl));
+    int r1=MIN(totalRows,(int)ceilf((pr.scrollX+(lx1-lx0))/zXl)+1);
+    ImU32 colLaneBg=ImGui::GetColorU32(ImGuiCol_FrameBg);
+    ImU32 colPatLine=ImGui::GetColorU32(ImVec4(1.0f,1.0f,1.0f,0.35f));
+    ImU32 colBeat=ImGui::GetColorU32(ImVec4(1.0f,1.0f,1.0f,0.10f));
+    ImU32 colTarget=ImGui::GetColorU32(ImVec4(1.0f,1.0f,1.0f,0.22f));
+    ImU32 colLabel=ImGui::GetColorU32(ImGuiCol_Text);
+    int hlBl=MAX(1,(int)sub->hilightB);
+    bool released=!ImGui::IsMouseDown(ImGuiMouseButton_Left) && !ImGui::IsMouseDown(ImGuiMouseButton_Right);
+    auto rowAtX=[&](float x) -> int {
+      return CLAMP((int)floorf((x-orgX)/zXl),0,MAX(0,totalRows-1));
+    };
+    auto laneGrid=[&](float y0, float y1) {
+      dl->AddRectFilled(ImVec2(lx0,y0),ImVec2(lx1,y1),colLaneBg);
+      for (int r=r0; r<=r1; r++) {
+        int rr=r%patLen;
+        float x=orgX+r*zXl;
+        if (rr==0) dl->AddLine(ImVec2(x,y0),ImVec2(x,y1),colPatLine,2.0f*dpiScale);
+        else if ((rr%hlBl)==0) dl->AddLine(ImVec2(x,y0),ImVec2(x,y1),colBeat);
+      }
+      // rows edited by the note panel
+      for (int t: tRows) {
+        if (t<r0 || t>r1) continue;
+        float x=orgX+t*zXl;
+        dl->AddRectFilled(ImVec2(x,y0),ImVec2(x+MAX(2.0f,zXl),y1),colTarget);
+      }
+    };
+    // paint helper: fills skipped rows when the mouse moves fast
+    auto paintTo=[&](int row, float val, bool erase) {
+      if (pr.laneLastRow<0) {
+        pr.lanePaint[row]=erase?-1:(int)roundf(val);
+      } else {
+        int a=pr.laneLastRow, b=row;
+        int dir=(b>=a)?1:-1;
+        for (int r=a; ; r+=dir) {
+          float t=(a==b)?1.0f:(float)(r-a)/(float)(b-a);
+          float v=pr.laneLastVal+(val-pr.laneLastVal)*t;
+          pr.lanePaint[r]=erase?-1:(int)roundf(v);
+          if (r==b) break;
+        }
+      }
+      pr.laneLastRow=row;
+      pr.laneLastVal=val;
+    };
+
+    // ----- volume lane -----
+    {
+      float y0=gridPos.y+gridSize.y+laneGap;
+      float y1=y0+laneVolH;
+      int maxVol=MAX(1,e->getMaxVolumeChan(pr.chan));
+      // label
+      dl->AddText(ImVec2(areaPos.x+4.0f*dpiScale,y0+2.0f*dpiScale),colLabel,_("Volume"));
+      dl->AddText(ImVec2(areaPos.x+4.0f*dpiScale,y0+2.0f*dpiScale+ImGui::GetFontSize()),ImGui::GetColorU32(ImGuiCol_TextDisabled),fmt::sprintf(_("max %.2X"),maxVol).c_str());
+
+      ImGui::SetCursorScreenPos(ImVec2(lx0,y0));
+      ImGui::InvisibleButton("##PRVolLane",ImVec2(MAX(1.0f,lx1-lx0),laneVolH),ImGuiButtonFlags_MouseButtonLeft|ImGuiButtonFlags_MouseButtonRight);
+      bool hov=ImGui::IsItemHovered();
+      dl->PushClipRect(ImVec2(lx0,y0),ImVec2(lx1,y1),true);
+      laneGrid(y0,y1);
+      float h=y1-y0-4.0f*dpiScale;
+      auto volY=[&](int v) -> float { return y1-2.0f*dpiScale-h*((float)v/(float)maxVol); };
+      ImVec4 cc=channelColor(pr.chan);
+      ImU32 colStep=ImGui::GetColorU32(ImVec4(cc.x*0.6f+0.2f,cc.y*0.6f+0.2f,cc.z*0.6f+0.2f,0.35f));
+      ImU32 colStepLine=ImGui::GetColorU32(ImVec4(cc.x*0.6f+0.4f,cc.y*0.6f+0.4f,cc.z*0.6f+0.4f,0.95f));
+      ImU32 colWrite=ImGui::GetColorU32(ImVec4(1.0f,1.0f,1.0f,0.95f));
+      ImU32 colPaint=ImGui::GetColorU32(ImVec4(1.0f,0.85f,0.3f,0.95f));
+      // value in force before the first visible row
+      int held=-1;
+      for (int r=r0-1; r>=0; r--) {
+        short v=rowPtr(r)[PR_COL_VOL];
+        if (v>=0) { held=v; break; }
+      }
+      bool painting=(pr.laneDrag==PR_LANE_VOL_PAINT || pr.laneDrag==PR_LANE_VOL_ERASE);
+      for (int r=r0; r<r1; r++) {
+        int v=rowPtr(r)[PR_COL_VOL];
+        bool written=(v>=0);
+        bool painted=false;
+        if (painting) {
+          auto it=pr.lanePaint.find(r);
+          if (it!=pr.lanePaint.end()) {
+            painted=true;
+            v=it->second;
+            written=(v>=0);
+          }
+        }
+        if (written) held=MIN(v,maxVol);
+        if (held<0) continue;
+        float x0=orgX+r*zXl, x1=x0+zXl;
+        float y=volY(held);
+        dl->AddRectFilled(ImVec2(x0,y),ImVec2(x1,y1),colStep);
+        dl->AddLine(ImVec2(x0,y),ImVec2(x1,y),colStepLine,1.5f*dpiScale);
+        if (written) {
+          float w=MAX(2.0f*dpiScale,MIN(zXl-1.0f,5.0f*dpiScale));
+          dl->AddRectFilled(ImVec2(x0,y-2.0f*dpiScale),ImVec2(x0+w,y+2.0f*dpiScale),painted?colPaint:colWrite);
+        } else if (painted) {
+          dl->AddLine(ImVec2(x0,y0),ImVec2(x0,y1),colPaint);
+        }
+      }
+      dl->PopClipRect();
+
+      if (hov && pr.laneDrag==PR_LANE_NONE && pr.drag==PR_DRAG_NONE) {
+        int r=rowAtX(io.MousePos.x);
+        short v=rowPtr(r)[PR_COL_VOL];
+        int hv=-1, from=-1;
+        for (int k=r; k>=0; k--) {
+          short kv=rowPtr(k)[PR_COL_VOL];
+          if (kv>=0) { hv=kv; from=k; break; }
+        }
+        if (v>=0) {
+          ImGui::SetTooltip(_("%.2X:%.2X  volume %.2X\ndrag: draw volume, right button or Erase tool: clear"),r/patLen,r%patLen,v);
+        } else if (hv>=0) {
+          ImGui::SetTooltip(_("%.2X:%.2X  volume %.2X (held from %.2X:%.2X)\ndrag: draw volume, right button or Erase tool: clear"),r/patLen,r%patLen,hv,from/patLen,from%patLen);
+        } else {
+          ImGui::SetTooltip(_("%.2X:%.2X  no volume written yet (instrument default)\ndrag: draw volume"),r/patLen,r%patLen);
+        }
+        bool left=ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+        bool right=ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+        if (left || right) {
+          pr.laneDrag=(right || pr.tool==PR_TOOL_ERASE)?PR_LANE_VOL_ERASE:PR_LANE_VOL_PAINT;
+          pr.lanePaint.clear();
+          pr.laneLastRow=-1;
+          pr.focusRow=-1;
+        }
+      }
+      if (pr.laneDrag==PR_LANE_VOL_PAINT || pr.laneDrag==PR_LANE_VOL_ERASE) {
+        bool erase=(pr.laneDrag==PR_LANE_VOL_ERASE);
+        int r=rowAtX(io.MousePos.x);
+        float val=CLAMP((y1-2.0f*dpiScale-io.MousePos.y)/h*(float)maxVol,0.0f,(float)maxVol);
+        if (!released) paintTo(r,val,erase);
+        if (io.MousePos.x>lx1-8.0f*dpiScale) pr.pendingScrollX=pr.scrollX+zXl;
+        if (io.MousePos.x<lx0+8.0f*dpiScale && pr.scrollX>0) pr.pendingScrollX=MAX(0.0f,pr.scrollX-zXl);
+        if (released) {
+          std::vector<std::pair<int,int>> vals(pr.lanePaint.begin(),pr.lanePaint.end());
+          pr.laneDrag=PR_LANE_NONE;
+          pr.lanePaint.clear();
+          pr.laneLastRow=-1;
+          if (!vals.empty()) queueOp([vals](PREditCtx& c) -> bool { return prSetVolume(c,vals); });
+        }
+      }
+    }
+
+    // ----- effect lane -----
+    {
+      float y0=gridPos.y+gridSize.y+laneGap*2.0f+laneVolH;
+      float y1=y0+laneFxH;
+      int effectColsL=MIN(DIV_MAX_EFFECTS,MAX(1,(int)sub->pat[pr.chan].effectCols));
+      // which effects the channel uses (and how often)
+      std::map<int,int> used;
+      for (int r=0; r<totalRows; r++) {
+        const short* row=rowPtr(r);
+        for (int i=0; i<effectColsL; i++) {
+          short f=row[PR_COL_FX(i)];
+          if (f>=0) used[f]++;
+        }
+      }
+      int fx=pr.laneFx;
+      if (fx<0) {
+        int best=0;
+        for (auto& u: used) if (u.second>best) { best=u.second; fx=u.first; }
+      }
+
+      // label + selector
+      ImGui::SetCursorScreenPos(ImVec2(areaPos.x+2.0f*dpiScale,y0+1.0f*dpiScale));
+      ImGui::SetNextItemWidth(kbW-4.0f*dpiScale);
+      String prevFx=(fx>=0)?fmt::sprintf("%.2X",fx):String("--");
+      if (pr.laneFx<0) prevFx+="*";
+      ImGui::SetNextWindowSizeConstraints(ImVec2(380.0f*dpiScale,0),ImVec2(760.0f*dpiScale,440.0f*dpiScale));
+      if (ImGui::BeginCombo("##PRLaneFx",prevFx.c_str(),ImGuiComboFlags_NoArrowButton)) {
+        if (ImGui::Selectable(_("auto: most used in this channel"),pr.laneFx<0)) pr.laneFx=-1;
+        if (!used.empty()) {
+          ImGui::SeparatorText(_("used in this channel"));
+          for (auto& u: used) {
+            ImGui::PushID(u.first);
+            ImGui::PushStyleColor(ImGuiCol_Text,uiColors[fxColors[u.first]]);
+            if (ImGui::Selectable(fmt::sprintf(_("%.2X  %s  (%d rows)"),u.first,fxDesc(u.first),u.second).c_str(),pr.laneFx==u.first)) pr.laneFx=u.first;
+            ImGui::PopStyleColor();
+            ImGui::PopID();
+          }
+        }
+        ImGui::SeparatorText(_("all effects of this chip"));
+        for (int i=0; i<256; i++) {
+          const char* d=e->getEffectDesc((unsigned char)i,pr.chan);
+          if (d==NULL) continue;
+          ImGui::PushID(i+256);
+          ImGui::PushStyleColor(ImGuiCol_Text,uiColors[fxColors[i]]);
+          if (ImGui::Selectable(fmt::sprintf("%.2X  %s",i,(strlen(d)>6)?(d+6):d).c_str(),pr.laneFx==i)) pr.laneFx=i;
+          ImGui::PopStyleColor();
+          ImGui::PopID();
+        }
+        ImGui::EndCombo();
+      }
+      if (ImGui::IsItemHovered()) {
+        if (fx>=0) {
+          ImGui::SetTooltip(_("effect shown in this lane: %.2X %s%s"),fx,fxDesc(fx),(pr.laneFx<0)?_("\n(* = picked automatically: the most used)"):"");
+        } else {
+          ImGui::SetTooltip("%s",_("choose the effect to show in this lane"));
+        }
+      }
+      dl->AddText(ImVec2(areaPos.x+4.0f*dpiScale,y0+ImGui::GetFrameHeight()+2.0f*dpiScale),ImGui::GetColorU32(ImGuiCol_TextDisabled),_("effect"));
+
+      ImGui::SetCursorScreenPos(ImVec2(lx0,y0));
+      ImGui::InvisibleButton("##PRFxLane",ImVec2(MAX(1.0f,lx1-lx0),laneFxH),ImGuiButtonFlags_MouseButtonLeft|ImGuiButtonFlags_MouseButtonRight);
+      bool hov=ImGui::IsItemHovered();
+      dl->PushClipRect(ImVec2(lx0,y0),ImVec2(lx1,y1),true);
+      laneGrid(y0,y1);
+      float h=y1-y0-4.0f*dpiScale;
+      auto fxY=[&](int v) -> float { return y1-2.0f*dpiScale-h*((float)MAX(0,v)/255.0f); };
+      bool painting=(pr.laneDrag==PR_LANE_FX_PAINT || pr.laneDrag==PR_LANE_FX_ERASE);
+      ImU32 colPaint=ImGui::GetColorU32(ImVec4(1.0f,0.85f,0.3f,0.95f));
+      ImU32 colFocus=ImGui::GetColorU32(ImVec4(1.0f,1.0f,1.0f,0.95f));
+      if (fx>=0) {
+        ImU32 colBar=ImGui::GetColorU32(uiColors[fxColors[fx]]);
+        // other effects on the row: a small tick at the bottom, so loose effects are visible too
+        ImU32 colOther=ImGui::GetColorU32(ImVec4(1.0f,1.0f,1.0f,0.25f));
+        for (int r=r0; r<r1; r++) {
+          const short* row=rowPtr(r);
+          int v=-2;
+          bool other=false;
+          for (int i=0; i<effectColsL; i++) {
+            short f=row[PR_COL_FX(i)];
+            if (f==fx && v==-2) v=row[PR_COL_FXVAL(i)];
+            else if (f>=0) other=true;
+          }
+          bool painted=false;
+          if (painting) {
+            auto it=pr.lanePaint.find(r);
+            if (it!=pr.lanePaint.end()) {
+              painted=true;
+              v=(it->second<0)?-2:it->second;
+            }
+          }
+          float x0=orgX+r*zXl;
+          float bw=MAX(2.0f*dpiScale,zXl-1.0f);
+          if (other) dl->AddRectFilled(ImVec2(x0,y1-3.0f*dpiScale),ImVec2(x0+bw,y1),colOther);
+          if (v==-2) {
+            if (painted) dl->AddLine(ImVec2(x0,y0),ImVec2(x0,y1),colPaint);
+            continue;
+          }
+          // small values still get a visible marker
+          float y=MIN(fxY(v),y1-4.0f*dpiScale);
+          dl->AddRectFilled(ImVec2(x0,y),ImVec2(x0+bw,y1),painted?colPaint:colBar);
+          if (zXl>=ImGui::CalcTextSize("00").x+2.0f*dpiScale) {
+            char vb[16];
+            snprintf(vb,15,"%.2X",MAX(0,v));
+            float ty=MAX(y0+1.0f,y-ImGui::GetFontSize()-1.0f);
+            dl->AddText(ImVec2(x0+1.0f,ty),ImGui::GetColorU32(ImGuiCol_Text),vb);
+          }
+          if (r==pr.focusRow) dl->AddRect(ImVec2(x0-1,y0+1),ImVec2(x0+bw+1,y1-1),colFocus,0,0,1.5f*dpiScale);
+        }
+      } else {
+        dl->AddText(ImVec2(lx0+6.0f*dpiScale,y0+4.0f*dpiScale),ImGui::GetColorU32(ImGuiCol_TextDisabled),_("no effects in this channel: choose one in the selector on the left to draw it"));
+      }
+      if (pr.focusRow>=r0 && pr.focusRow<r1) {
+        float x0=orgX+pr.focusRow*zXl;
+        dl->AddRect(ImVec2(x0-1,y0+1),ImVec2(x0+MAX(2.0f,zXl)+1,y1-1),colFocus,0,0,1.5f*dpiScale);
+      }
+      dl->PopClipRect();
+
+      if (hov && pr.laneDrag==PR_LANE_NONE && pr.drag==PR_DRAG_NONE) {
+        int r=rowAtX(io.MousePos.x);
+        String tip=fmt::sprintf("%.2X:%.2X",r/patLen,r%patLen);
+        std::vector<PRFx> rf=prRowEffects(rowPtr(r),effectColsL);
+        if (rf.empty()) tip+=String("  ")+_("no effects");
+        for (const PRFx& x: rf) {
+          if (x.fx<0) continue;
+          tip+=fmt::sprintf("\n%.2X%.2X  %s",x.fx,MAX(0,x.val),fxDesc(x.fx));
+        }
+        tip+=String("\n\n")+_("click: show this row in the note panel");
+        if (fx>=0) tip+=String("\n")+fmt::sprintf(_("Draw tool + drag: write %.2X with the value set by the height\nright button or Erase tool: remove %.2X"),fx,fx);
+        ImGui::SetTooltip("%s",tip.c_str());
+        bool left=ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+        bool right=ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+        if (left || right) {
+          pr.lanePaint.clear();
+          pr.laneLastRow=-1;
+          if (fx>=0 && (right || pr.tool==PR_TOOL_ERASE)) {
+            pr.laneDrag=PR_LANE_FX_ERASE;
+          } else if (fx>=0 && pr.tool==PR_TOOL_DRAW) {
+            pr.laneDrag=PR_LANE_FX_PAINT;
+          } else if (left) {
+            pr.laneDrag=PR_LANE_FX_PICK;
+          }
+          // the clicked row goes to the note panel: its note if one starts there, the row otherwise
+          bool noteThere=false;
+          for (const PRNote& n: notes) if (n.start==r) noteThere=true;
+          pr.sel.clear();
+          if (noteThere) {
+            pr.sel.insert(r);
+            pr.focusRow=-1;
+          } else {
+            pr.focusRow=r;
+          }
+        }
+      }
+      if (pr.laneDrag==PR_LANE_FX_PICK && released) pr.laneDrag=PR_LANE_NONE;
+      if (pr.laneDrag==PR_LANE_FX_PAINT || pr.laneDrag==PR_LANE_FX_ERASE) {
+        bool erase=(pr.laneDrag==PR_LANE_FX_ERASE);
+        int r=rowAtX(io.MousePos.x);
+        float val=CLAMP((y1-2.0f*dpiScale-io.MousePos.y)/h*255.0f,0.0f,255.0f);
+        if (!released) paintTo(r,val,erase);
+        if (io.MousePos.x>lx1-8.0f*dpiScale) pr.pendingScrollX=pr.scrollX+zXl;
+        if (io.MousePos.x<lx0+8.0f*dpiScale && pr.scrollX>0) pr.pendingScrollX=MAX(0.0f,pr.scrollX-zXl);
+        if (released) {
+          std::vector<std::pair<int,int>> vals(pr.lanePaint.begin(),pr.lanePaint.end());
+          pr.laneDrag=PR_LANE_NONE;
+          pr.lanePaint.clear();
+          pr.laneLastRow=-1;
+          int lfx=fx;
+          if (!vals.empty() && lfx>=0) {
+            if (erase) {
+              std::vector<int> rows;
+              for (auto& v: vals) rows.push_back(v.first);
+              queueOp([rows,lfx](PREditCtx& c) -> bool { return prRemoveEffect(c,rows,lfx); });
+            } else {
+              queueOp([vals,lfx,prp](PREditCtx& c) -> bool {
+                bool any=false;
+                for (auto& v: vals) {
+                  if (prSetEffect(c,{v.first},lfx,v.second,&prp->pendRefused)) any=true;
+                }
+                return any;
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
   ImGui::SetCursorScreenPos(ImVec2(areaPos.x,areaPos.y+avail.y));
   ImGui::Dummy(ImVec2(0,0));
 
@@ -1183,7 +1949,7 @@ void FurnaceGUI::drawPianoRoll() {
     }
     ImGui::SameLine();
     if (ImGui::Button(_("Cancel"))) {
-      pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendIns.clear(); pr.pendInsVal=-1;
+      pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendOp=nullptr;
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();

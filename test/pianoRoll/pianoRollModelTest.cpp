@@ -594,6 +594,96 @@ int main() {
     CHECK(n.size()==3 && n[0].ins==3 && n[1].ins==6 && n[2].ins==3);
   }
   {
+    TEST("E6 efeito: grava na primeira coluna livre, sem tocar nota, instrumento e volume");
+    FakeChan c(16,{0},3);
+    c.note(0,0,C4,1); c.row(0,0)[PR_COL_VOL]=0x40; c.fx(0,0,0,0xed,2);
+    c.note(0,4,PR_PITCH_OFF);
+    auto s0=c.snap();
+    PREditCtx x=c.ctx();
+    std::vector<int> ref;
+    CHECK(prSetEffect(x,{0},0x08,0xf0,&ref));
+    CHECK(ref.empty());
+    CHECK(c.row(0,0)[PR_COL_FX(0)]==0xed && c.row(0,0)[PR_COL_FXVAL(0)]==2);
+    CHECK(c.row(0,0)[PR_COL_FX(1)]==0x08 && c.row(0,0)[PR_COL_FXVAL(1)]==0xf0);
+    auto s1=c.snap();
+    int diffs=0;
+    for (size_t i=0; i<s0.size(); i++) if (s0[i]!=s1[i]) diffs++;
+    CHECK(diffs==2);
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==1 && n[0].start==0 && n[0].end==4 && n[0].ins==1 && n[0].delayTicks==2);
+  }
+  {
+    TEST("E6 efeito: se a linha já tem o efeito, só o valor muda (não duplica)");
+    FakeChan c(16,{0},2);
+    c.fx(0,3,1,0x08,0x11);
+    PREditCtx x=c.ctx();
+    CHECK(prSetEffect(x,{3},0x08,0x22,NULL));
+    CHECK(c.row(0,3)[PR_COL_FX(1)]==0x08 && c.row(0,3)[PR_COL_FXVAL(1)]==0x22);
+    CHECK(c.row(0,3)[PR_COL_FX(0)]==-1);
+    CHECK(!prSetEffect(x,{3},0x08,0x22,NULL)); // nada a mudar
+  }
+  {
+    TEST("E6 efeito: sem coluna livre a linha é recusada e não muda");
+    FakeChan c(16,{0},1);
+    c.fx(0,2,0,0xec,4);
+    c.note(0,5,C4,1);
+    auto s0=c.snap();
+    PREditCtx x=c.ctx();
+    std::vector<int> ref;
+    CHECK(prSetEffect(x,{2,5},0x08,0xf0,&ref));
+    CHECK(ref.size()==1 && ref[0]==2);
+    CHECK(c.row(0,2)[PR_COL_FX(0)]==0xec && c.row(0,2)[PR_COL_FXVAL(0)]==4);
+    CHECK(c.row(0,5)[PR_COL_FX(0)]==0x08);
+    // coluna com só valor (sem efeito) não conta como livre
+    FakeChan d(16,{0},1);
+    d.row(0,1)[PR_COL_FXVAL(0)]=0x33;
+    PREditCtx y=d.ctx();
+    std::vector<int> ref2;
+    CHECK(!prSetEffect(y,{1},0x08,0xf0,&ref2));
+    CHECK(ref2.size()==1);
+  }
+  {
+    TEST("E6 efeito solto (EC04 sem nota) é lido e editável");
+    FakeChan c(16,{0},2);
+    c.note(0,0,C4,1); c.note(0,8,PR_PITCH_OFF);
+    c.fx(0,6,0,0xec,4);  // linha sem nota
+    auto e6=prRowEffects(c.row(0,6),2);
+    CHECK(e6.size()==1 && e6[0].col==0 && e6[0].fx==0xec && e6[0].val==4);
+    PREditCtx x=c.ctx();
+    CHECK(prSetEffectValueWherePresent(x,{6},0xec,0x02));
+    CHECK(c.row(0,6)[PR_COL_FXVAL(0)]==2);
+    CHECK(!prSetEffectValueWherePresent(x,{0},0xec,0x02)); // linha 0 não tem EC: nada
+    CHECK(prRemoveEffect(x,{6},0xec));
+    CHECK(c.row(0,6)[PR_COL_FX(0)]==-1 && c.row(0,6)[PR_COL_FXVAL(0)]==-1);
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==1 && n[0].end==8);
+  }
+  {
+    TEST("E6 efeito em várias linhas, inclusive repetida e fora da música");
+    FakeChan c(8,{0,0},1);
+    PREditCtx x=c.ctx();
+    std::vector<int> ref;
+    CHECK(prSetEffect(x,{1,9,99,-3,1},0x0a,0x0f,&ref)); // 1 e 9 são a mesma célula (pattern repetida)
+    CHECK(ref.empty());
+    CHECK(c.row(0,1)[PR_COL_FX(0)]==0x0a);
+  }
+  {
+    TEST("E6 volume: grava e apaga só a coluna de volume");
+    FakeChan c(16,{0},1);
+    c.note(0,0,C4,1); c.fx(0,0,0,0x08,0x11); c.note(0,4,PR_PITCH_OFF);
+    auto s0=c.snap();
+    PREditCtx x=c.ctx();
+    CHECK(prSetVolume(x,{{0,0x7f},{2,0x20},{30,5}}));
+    CHECK(c.row(0,0)[PR_COL_VOL]==0x7f && c.row(0,2)[PR_COL_VOL]==0x20);
+    auto s1=c.snap();
+    int diffs=0;
+    for (size_t i=0; i<s0.size(); i++) if (s0[i]!=s1[i]) diffs++;
+    CHECK(diffs==2);
+    CHECK(prSetVolume(x,{{2,-1}}));
+    CHECK(c.row(0,2)[PR_COL_VOL]==-1);
+    CHECK(!prSetVolume(x,{{2,-1}}));
+  }
+  {
     TEST("prefs: ida e volta em JSON (OFF/REL, fold, nomes com acento e aspas)");
     PRPrefs a;
     a.get(0).endRel=true;

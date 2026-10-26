@@ -314,3 +314,111 @@ bool prSetInstrument(PREditCtx& ctx, const std::vector<int>& starts, int ins) {
   }
   return true;
 }
+
+// ---------------- E6: effects and volume ----------------
+
+std::vector<PRFx> prRowEffects(const short* row, int effectCols) {
+  std::vector<PRFx> r;
+  if (effectCols>DIV_MAX_EFFECTS) effectCols=DIV_MAX_EFFECTS;
+  for (int i=0; i<effectCols; i++) {
+    short f=row[PR_COL_FX(i)];
+    short v=row[PR_COL_FXVAL(i)];
+    if (f<0 && v<0) continue;
+    r.push_back(PRFx(i,(f<0)?-1:f,(v<0)?-1:v));
+  }
+  return r;
+}
+
+static int prClampCols(int effectCols) {
+  if (effectCols<1) return 1;
+  if (effectCols>DIV_MAX_EFFECTS) return DIV_MAX_EFFECTS;
+  return effectCols;
+}
+
+bool prSetEffect(PREditCtx& ctx, const std::vector<int>& rows, int fx, int val, std::vector<int>* refused) {
+  if (fx<0 || fx>255) return false;
+  if (val<0) val=0;
+  if (val>255) val=255;
+  int cols=prClampCols(ctx.effectCols);
+  bool changed=false;
+  std::vector<int> done;
+  for (int r: rows) {
+    if (r<0 || r>=ctx.total) continue;
+    bool dup=false;
+    for (int d: done) if (d==r) dup=true;
+    if (dup) continue;
+    done.push_back(r);
+    const short* row=ctx.get(r);
+    int col=-1;
+    for (int i=0; i<cols; i++) {
+      if (row[PR_COL_FX(i)]==fx) { col=i; break; }
+    }
+    if (col<0) {
+      for (int i=0; i<cols; i++) {
+        if (row[PR_COL_FX(i)]<0 && row[PR_COL_FXVAL(i)]<0) { col=i; break; }
+      }
+    }
+    if (col<0) {
+      if (refused!=NULL) refused->push_back(r);
+      continue;
+    }
+    if (row[PR_COL_FX(col)]==fx && row[PR_COL_FXVAL(col)]==val) continue;
+    short* m=ctx.getMut(r);
+    m[PR_COL_FX(col)]=fx;
+    m[PR_COL_FXVAL(col)]=val;
+    changed=true;
+  }
+  return changed;
+}
+
+bool prSetEffectValueWherePresent(PREditCtx& ctx, const std::vector<int>& rows, int fx, int val) {
+  if (fx<0 || fx>255) return false;
+  if (val<0) val=0;
+  if (val>255) val=255;
+  int cols=prClampCols(ctx.effectCols);
+  bool changed=false;
+  for (int r: rows) {
+    if (r<0 || r>=ctx.total) continue;
+    const short* row=ctx.get(r);
+    for (int i=0; i<cols; i++) {
+      if (row[PR_COL_FX(i)]!=fx) continue;
+      if (row[PR_COL_FXVAL(i)]!=val) {
+        ctx.getMut(r)[PR_COL_FXVAL(i)]=val;
+        changed=true;
+      }
+      break;
+    }
+  }
+  return changed;
+}
+
+bool prRemoveEffect(PREditCtx& ctx, const std::vector<int>& rows, int fx) {
+  if (fx<0 || fx>255) return false;
+  int cols=prClampCols(ctx.effectCols);
+  bool changed=false;
+  for (int r: rows) {
+    if (r<0 || r>=ctx.total) continue;
+    for (int i=0; i<cols; i++) {
+      if (ctx.get(r)[PR_COL_FX(i)]!=fx) continue;
+      short* m=ctx.getMut(r);
+      m[PR_COL_FX(i)]=-1;
+      m[PR_COL_FXVAL(i)]=-1;
+      changed=true;
+    }
+  }
+  return changed;
+}
+
+bool prSetVolume(PREditCtx& ctx, const std::vector<std::pair<int,int>>& rowVal) {
+  bool changed=false;
+  for (auto& rv: rowVal) {
+    int r=rv.first;
+    if (r<0 || r>=ctx.total) continue;
+    int v=rv.second;
+    if (v<-1) v=-1;
+    if (ctx.get(r)[PR_COL_VOL]==v) continue;
+    ctx.getMut(r)[PR_COL_VOL]=v;
+    changed=true;
+  }
+  return changed;
+}
