@@ -23242,3 +23242,542 @@ msgstr ""
 
 #~ msgid "WA"
 #~ msgstr "ON"
+
+# piano roll fork
+#: src/gui/pianoRoll.cpp:240
+msgid "could not write the .roll.json file next to the song"
+msgstr "não foi possível gravar o arquivo .roll.json ao lado da música"
+
+#: src/gui/pianoRoll.cpp:281
+#, c-format
+msgid ""
+"no free effect column for EDxx/ECxx on %d row(s): nothing was changed (add "
+"effect columns to this channel, or use Row snap)"
+msgstr ""
+"sem coluna de efeito livre para EDxx/ECxx em %d linha(s): nada foi alterado "
+"(acrescente colunas de efeito a este canal ou use o snap por linha)"
+
+#: src/gui/pianoRoll.cpp:340
+msgid ""
+"no free pattern left in this channel to make it unique; nothing was changed"
+msgstr ""
+"não há pattern livre neste canal para torná-la única; nada foi alterado"
+
+#: src/gui/pianoRoll.cpp:378
+#, c-format
+msgid "made %d pattern(s) unique"
+msgstr "%d pattern(s) tornada(s) única(s)"
+
+#: src/gui/pianoRoll.cpp:381
+#, c-format
+msgid ""
+"%d effect(s) did not fit (no free effect column) and stayed where they were;"
+" add effect columns to this channel in the pattern view"
+msgstr ""
+"%d efeito(s) não couberam (sem coluna de efeito livre) e ficaram onde "
+"estavam; acrescente colunas de efeito a este canal na janela de pattern"
+
+#: src/gui/pianoRoll.cpp:403
+#, c-format
+msgid "instrument %02X applied to %d note(s)"
+msgstr "instrumento %02X aplicado a %d nota(s)"
+
+#: src/gui/pianoRoll.cpp:427
+msgid "piano roll##PRTransport"
+msgstr "piano roll##PRTransport"
+
+#: src/gui/pianoRoll.cpp:432
+msgid ""
+"piano roll transport\n"
+"on: Space is play/stop; play starts at the piano roll's marker;\n"
+"with Repeat pattern on, playback loops inside the I/O selection"
+msgstr ""
+"transporte do piano roll\n"
+"ligado: Espaço toca/para; o play começa no marcador do piano roll;\n"
+"com Repetir pattern ligado, a reprodução fica em loop dentro da seleção I/O"
+
+#: src/gui/pianoRoll.cpp:518 src/gui/guiConst.cpp:657
+msgid "Piano Roll"
+msgstr "Piano Roll"
+
+#: src/gui/pianoRoll.cpp:579
+msgid "Erase"
+msgstr "Apagar"
+
+#: src/gui/pianoRoll.cpp:586
+#, c-format
+msgid "tool (%s)"
+msgstr "ferramenta (%s)"
+
+#: src/gui/pianoRoll.cpp:591
+msgid "Snap: row"
+msgstr "Snap: linha"
+
+#: src/gui/pianoRoll.cpp:591
+msgid "Snap: 1/2"
+msgstr "Snap: 1/2"
+
+#: src/gui/pianoRoll.cpp:591
+msgid "Snap: tick"
+msgstr "Snap: tick"
+
+#: src/gui/pianoRoll.cpp:597
+msgid ""
+"where note starts and ends can fall:\n"
+"row: on rows (no effects written)\n"
+"1/2 and tick: inside a row, written as EDxx (start delay) and ECxx (cut)"
+msgstr ""
+"onde o início e o fim das notas podem cair:\n"
+"linha: nas linhas (nenhum efeito é escrito)\n"
+"1/2 e tick: dentro da linha, escritos como EDxx (atraso no início) e ECxx (corte)"
+
+#: src/gui/pianoRoll.cpp:602
+msgid "End: REL##PREnd"
+msgstr "Fim: REL##PREnd"
+
+#: src/gui/pianoRoll.cpp:602
+msgid "End: OFF##PREnd"
+msgstr "Fim: OFF##PREnd"
+
+#: src/gui/pianoRoll.cpp:606
+msgid ""
+"how notes drawn in this channel end: OFF (note off) or REL (note release)"
+msgstr ""
+"como terminam as notas desenhadas neste canal: OFF (note off) ou REL (note "
+"release)"
+
+#: src/gui/pianoRoll.cpp:608
+msgid "Fold"
+msgstr "Recolher"
+
+#: src/gui/pianoRoll.cpp:612
+msgid "show only the pitches used in this channel (saved per channel)"
+msgstr "mostrar só as alturas usadas neste canal (gravado por canal)"
+
+#: src/gui/pianoRoll.cpp:614
+msgid "Ghost notes"
+msgstr "Notas fantasma"
+
+#: src/gui/pianoRoll.cpp:615
+msgid "show the other channels of the same chip in gray"
+msgstr "mostrar os outros canais do mesmo chip em cinza"
+
+#: src/gui/pianoRoll.cpp:617
+msgid "Follow playback"
+msgstr "Seguir reprodução"
+
+#: src/gui/pianoRoll.cpp:626
+msgid "horizontal zoom (Ctrl+wheel)"
+msgstr "zoom horizontal (Ctrl+roda)"
+
+#: src/gui/pianoRoll.cpp:631
+msgid "vertical zoom (Ctrl+Shift+wheel)"
+msgstr "zoom vertical (Ctrl+Shift+roda)"
+
+#: src/gui/pianoRoll.cpp:634
+msgid "Repeated: ask"
+msgstr "Repetida: perguntar"
+
+#: src/gui/pianoRoll.cpp:634
+msgid "Repeated: edit all"
+msgstr "Repetida: editar todas"
+
+#: src/gui/pianoRoll.cpp:634
+msgid "Repeated: make unique"
+msgstr "Repetida: tornar única"
+
+#: src/gui/pianoRoll.cpp:640
+msgid ""
+"what to do when an edit falls in a pattern used in more than one order "
+"position"
+msgstr ""
+"o que fazer quando uma edição cai numa pattern usada em mais de uma posição "
+"da order"
+
+#: src/gui/pianoRoll.cpp:644
+msgid "Lanes"
+msgstr "Faixas"
+
+#: src/gui/pianoRoll.cpp:645
+msgid "show the volume and effect lanes under the roll"
+msgstr "mostrar as faixas de volume e de efeito embaixo do roll"
+
+#: src/gui/pianoRoll.cpp:653
+msgid "Clear transport"
+msgstr "Limpar transporte"
+
+#: src/gui/pianoRoll.cpp:659
+msgid ""
+"remove the start marker and the loop\n"
+"(click the ruler above the roll to set the marker; I and O set the loop)"
+msgstr ""
+"remover o marcador de início e o loop\n"
+"(clique na régua acima do roll para pôr o marcador; I e O definem o loop)"
+
+#: src/gui/pianoRoll.cpp:662
+#, c-format
+msgid "start %.2X:%.2X"
+msgstr "início %.2X:%.2X"
+
+#: src/gui/pianoRoll.cpp:667
+#, c-format
+msgid "loop %.2X:%.2X - %.2X:%.2X"
+msgstr "loop %.2X:%.2X - %.2X:%.2X"
+
+#: src/gui/pianoRoll.cpp:669
+#, c-format
+msgid "loop %.2X:%.2X - (press O)"
+msgstr "loop %.2X:%.2X - (aperte O)"
+
+#: src/gui/pianoRoll.cpp:675
+msgid "(off: turn on \"piano roll\" next to Poly)"
+msgstr "(desligado: ligue \"piano roll\" ao lado de Poly)"
+
+#: src/gui/pianoRoll.cpp:677
+msgid "(the loop plays with Repeat pattern on)"
+msgstr "(o loop toca com Repetir pattern ligado)"
+
+#: src/gui/pianoRoll.cpp:690
+msgid ""
+"S/D/E: tools, Shift+drag: duplicate, double-click: add effect, Del: delete, "
+"Ctrl+A: select all, I/O: loop"
+msgstr ""
+"S/D/E: ferramentas, Shift+arrastar: duplicar, duplo clique: efeito, Del: "
+"apagar, Ctrl+A: tudo, I/O: loop"
+
+#: src/gui/pianoRoll.cpp:901
+msgid "(not valid on this chip)"
+msgstr "(não vale neste chip)"
+
+#: src/gui/pianoRoll.cpp:920
+#, c-format
+msgid "%d notes"
+msgstr "%d notas"
+
+#: src/gui/pianoRoll.cpp:937
+msgid "type the position as order:row in hex, e.g. 01:0C"
+msgstr "digite a posição como order:linha em hexadecimal, ex. 01:0C"
+
+#: src/gui/pianoRoll.cpp:940
+msgid "order:row (hex), Enter to move the note"
+msgstr "order:linha (hex), Enter move a nota"
+
+#: src/gui/pianoRoll.cpp:962
+msgid "the end must come after the start (order:row in hex)"
+msgstr "o fim precisa vir depois do início (order:linha em hex)"
+
+#: src/gui/pianoRoll.cpp:965
+msgid "first row after the note (order:row, hex), Enter to apply"
+msgstr "primeira linha depois da nota (order:linha, hex), Enter aplica"
+
+#: src/gui/pianoRoll.cpp:995
+msgid ""
+"length in rows; Enter applies it to every selected note\n"
+"(a note never runs over the next note that is not selected)"
+msgstr ""
+"duração em linhas; Enter aplica a todas as notas selecionadas\n"
+"(uma nota nunca passa por cima da próxima nota não selecionada)"
+
+#: src/gui/pianoRoll.cpp:1031
+msgid "a selected note would leave the pitch range; nothing was changed"
+msgstr "uma nota selecionada sairia da faixa de alturas; nada foi alterado"
+
+#: src/gui/pianoRoll.cpp:1034
+msgid "transpose the selected notes"
+msgstr "transpor as notas selecionadas"
+
+#: src/gui/pianoRoll.cpp:1050
+msgid "(missing)"
+msgstr "(ausente)"
+
+#: src/gui/pianoRoll.cpp:1054 src/gui/pianoRoll.cpp:1991
+msgid " (inherited)"
+msgstr " (herdado)"
+
+#: src/gui/pianoRoll.cpp:1072
+#, c-format
+msgid "Row %.2X:%.2X (no note starts here)"
+msgstr "Linha %.2X:%.2X (nenhuma nota começa aqui)"
+
+#: src/gui/pianoRoll.cpp:1076
+#, c-format
+msgid "volume %.2X"
+msgstr "volume %.2X"
+
+#: src/gui/pianoRoll.cpp:1079
+msgid ""
+"Select a note to see and edit it here, or click a row in the effect lane "
+"below."
+msgstr ""
+"Selecione uma nota para vê-la e editá-la aqui, ou clique numa linha da faixa"
+" de efeito abaixo."
+
+#: src/gui/pianoRoll.cpp:1084
+msgid "Effects"
+msgstr "Efeitos"
+
+#: src/gui/pianoRoll.cpp:1115
+#, c-format
+msgid "present on %d of %d rows"
+msgstr "presente em %d de %d linhas"
+
+#: src/gui/pianoRoll.cpp:1131
+msgid "value (hex); Enter changes it on every row that has this effect"
+msgstr "valor (hex); Enter muda em todas as linhas que têm este efeito"
+
+#: src/gui/pianoRoll.cpp:1144
+msgid "add this effect to the rows that don't have it"
+msgstr "acrescentar este efeito às linhas que não o têm"
+
+#: src/gui/pianoRoll.cpp:1151
+msgid "remove this effect from these rows"
+msgstr "remover este efeito destas linhas"
+
+#: src/gui/pianoRoll.cpp:1176
+msgid "effect (hex)"
+msgstr "efeito (hex)"
+
+#: src/gui/pianoRoll.cpp:1181
+msgid "list of effects for this chip"
+msgstr "lista de efeitos deste chip"
+
+#: src/gui/pianoRoll.cpp:1205
+msgid "value (hex)"
+msgstr "valor (hex)"
+
+#: src/gui/pianoRoll.cpp:1207
+msgid "Apply##PRAddApply"
+msgstr "Aplicar##PRAddApply"
+
+#: src/gui/pianoRoll.cpp:1208
+#, c-format
+msgid ""
+"write this effect on the %d row(s) above\n"
+"(same effect already there: only its value changes; no free column: the row is skipped)"
+msgstr ""
+"escrever este efeito nas %d linha(s) acima\n"
+"(mesmo efeito já presente: só o valor muda; sem coluna livre: a linha é pulada)"
+
+#: src/gui/pianoRoll.cpp:1221
+msgid "type the effect and the value in hex, e.g. 08 and F0"
+msgstr "digite o efeito e o valor em hex, ex. 08 e F0"
+
+#: src/gui/pianoRoll.cpp:1496
+#, c-format
+msgid ""
+"portamento 03%.2X: %d tick(s)\n"
+"drag left or right to change the speed"
+msgstr ""
+"portamento 03%.2X: %d tick(s)\n"
+"arraste para os lados para mudar a velocidade"
+
+#: src/gui/pianoRoll.cpp:1586
+#, c-format
+msgid "portamento 03%.2X: %d tick(s)"
+msgstr "portamento 03%.2X: %d tick(s)"
+
+#: src/gui/pianoRoll.cpp:1975
+msgid "end of song"
+msgstr "fim da música"
+
+#: src/gui/pianoRoll.cpp:1976
+msgid "next note"
+msgstr "próxima nota"
+
+#: src/gui/pianoRoll.cpp:1983
+#, c-format
+msgid ""
+"\n"
+"portamento 03%.2X: no note is sounding right before this one, so there is nothing to slide from"
+msgstr ""
+"\n"
+"portamento 03%.2X: nenhuma nota está soando logo antes desta, então não há de onde deslizar"
+
+#: src/gui/pianoRoll.cpp:1985
+#, c-format
+msgid ""
+"\n"
+"portamento 03%.2X: slides from the previous note in %d tick(s)%s"
+msgstr ""
+"\n"
+"portamento 03%.2X: desliza a partir da nota anterior em %d tick(s)%s"
+
+#: src/gui/pianoRoll.cpp:1985
+msgid " (approximate: this song does not use linear pitch)"
+msgstr " (aproximado: esta música não usa linear pitch)"
+
+#: src/gui/pianoRoll.cpp:1991
+msgid "instrument"
+msgstr "instrumento"
+
+#: src/gui/pianoRoll.cpp:1992
+msgid "ends by"
+msgstr "termina por"
+
+#: src/gui/pianoRoll.cpp:2187
+#, c-format
+msgid ""
+"%.2X:%.2X\n"
+"click: put the start marker here (Play starts from it)\n"
+"I / O: loop from / to the marker"
+msgstr ""
+"%.2X:%.2X\n"
+"clique: põe o marcador de início aqui (o play começa nele)\n"
+"I / O: loop a partir do / até o marcador"
+
+#: src/gui/pianoRoll.cpp:2235
+#, c-format
+msgid "order %.2X: pattern %.2X (used %d times in this channel)"
+msgstr "order %.2X: pattern %.2X (usada %d vezes neste canal)"
+
+#: src/gui/pianoRoll.cpp:2309
+#, c-format
+msgid ""
+"%s: %s\n"
+"right-click: rename this row"
+msgstr ""
+"%s: %s\n"
+"botão direito: renomear esta linha"
+
+#: src/gui/pianoRoll.cpp:2311
+#, c-format
+msgid ""
+"%s\n"
+"right-click: give this row a name (e.g. kick, snare)"
+msgstr ""
+"%s\n"
+"botão direito: dar um nome a esta linha (ex. bumbo, caixa)"
+
+#: src/gui/pianoRoll.cpp:2323
+#, c-format
+msgid "Name for row %s (this channel)"
+msgstr "Nome para a linha %s (este canal)"
+
+#: src/gui/pianoRoll.cpp:2328
+msgid "OK##PRRowNameOK"
+msgstr "OK##PRRowNameOK"
+
+#: src/gui/pianoRoll.cpp:2330
+msgid "Remove##PRRowNameDel"
+msgstr "Remover##PRRowNameDel"
+
+#: src/gui/pianoRoll.cpp:2404
+#, c-format
+msgid "max %.2X"
+msgstr "máx %.2X"
+
+#: src/gui/pianoRoll.cpp:2461
+#, c-format
+msgid ""
+"%.2X:%.2X  volume %.2X\n"
+"drag: draw volume, right button or Erase tool: clear"
+msgstr ""
+"%.2X:%.2X  volume %.2X\n"
+"arrastar: desenha o volume; botão direito ou ferramenta Apagar: limpa"
+
+#: src/gui/pianoRoll.cpp:2463
+#, c-format
+msgid ""
+"%.2X:%.2X  volume %.2X (held from %.2X:%.2X)\n"
+"drag: draw volume, right button or Erase tool: clear"
+msgstr ""
+"%.2X:%.2X  volume %.2X (vindo de %.2X:%.2X)\n"
+"arrastar: desenha o volume; botão direito ou ferramenta Apagar: limpa"
+
+#: src/gui/pianoRoll.cpp:2465
+#, c-format
+msgid ""
+"%.2X:%.2X  no volume written yet (instrument default)\n"
+"drag: draw volume"
+msgstr ""
+"%.2X:%.2X  nenhum volume escrito ainda (padrão do instrumento)\n"
+"arrastar: desenha o volume"
+
+#: src/gui/pianoRoll.cpp:2520
+msgid "auto: most used in this channel"
+msgstr "auto: o mais usado neste canal"
+
+#: src/gui/pianoRoll.cpp:2522
+msgid "used in this channel"
+msgstr "usados neste canal"
+
+#: src/gui/pianoRoll.cpp:2526
+#, c-format
+msgid "%.2X  %s  (%d rows)"
+msgstr "%.2X  %s  (%d linhas)"
+
+#: src/gui/pianoRoll.cpp:2531
+msgid "all effects of this chip"
+msgstr "todos os efeitos deste chip"
+
+#: src/gui/pianoRoll.cpp:2545
+#, c-format
+msgid "effect shown in this lane: %.2X %s%s"
+msgstr "efeito mostrado nesta faixa: %.2X %s%s"
+
+#: src/gui/pianoRoll.cpp:2545
+msgid ""
+"\n"
+"(* = picked automatically: the most used)"
+msgstr ""
+"\n"
+"(* = escolhido automaticamente: o mais usado)"
+
+#: src/gui/pianoRoll.cpp:2547
+msgid "choose the effect to show in this lane"
+msgstr "escolha o efeito mostrado nesta faixa"
+
+#: src/gui/pianoRoll.cpp:2550
+msgid "effect"
+msgstr "efeito"
+
+#: src/gui/pianoRoll.cpp:2602
+msgid ""
+"no effects in this channel: choose one in the selector on the left to draw "
+"it"
+msgstr ""
+"nenhum efeito neste canal: escolha um no seletor à esquerda para desenhá-lo"
+
+#: src/gui/pianoRoll.cpp:2614
+msgid "no effects"
+msgstr "sem efeitos"
+
+#: src/gui/pianoRoll.cpp:2619
+msgid "click: show this row in the note panel"
+msgstr "clique: mostra esta linha no painel de nota"
+
+#: src/gui/pianoRoll.cpp:2620
+#, c-format
+msgid ""
+"Draw tool + drag: write %.2X with the value set by the height\n"
+"right button or Erase tool: remove %.2X"
+msgstr ""
+"ferramenta Desenhar + arrastar: escreve %.2X com o valor dado pela altura\n"
+"botão direito ou ferramenta Apagar: remove %.2X"
+
+#: src/gui/pianoRoll.cpp:2687 src/gui/pianoRoll.cpp:2690
+msgid "Repeated pattern##PRRepeatPopup"
+msgstr "Pattern repetida##PRRepeatPopup"
+
+#: src/gui/pianoRoll.cpp:2691
+#, c-format
+msgid "This pattern appears in %d positions of this channel's order."
+msgstr "Esta pattern aparece em %d posições da order deste canal."
+
+#: src/gui/pianoRoll.cpp:2692
+msgid ""
+"Your answer is remembered until Furnace is closed (change it in the "
+"toolbar)."
+msgstr "Sua resposta vale até fechar o Furnace (dá para mudar na barra)."
+
+#: src/gui/pianoRoll.cpp:2693
+msgid "Edit all"
+msgstr "Editar todas"
+
+#: src/gui/pianoRoll.cpp:2699
+msgid "Make unique at this position"
+msgstr "Tornar única nesta posição"
+
+#: src/gui/gui.cpp:4756
+msgid "piano roll"
+msgstr "piano roll"
