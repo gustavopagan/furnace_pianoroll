@@ -389,9 +389,47 @@ bool FurnaceGUI::pianoRollApplyInstrument(int ins) {
 
 // ---------------- the window ----------------
 
-// E7b: Play / Play-Stop start from here when the roll has a marker (see FurnaceGUI::play)
+// E7b: the "piano roll" toggle next to Poly in the play controls
+void FurnaceGUI::drawPianoRollTransportToggle() {
+  pushToggleColors(pianoRollTransport);
+  if (ImGui::Button(_("piano roll##PRTransport"))) {
+    pianoRollTransport=!pianoRollTransport;
+    pianoRollHasPause=false;
+  }
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("%s",_("piano roll transport\non: Space is play/stop; play starts at the piano roll's marker;\nwith Repeat pattern on, playback loops inside the I/O selection"));
+  }
+  popToggleColors();
+}
+
+// E7b: Space with the "piano roll" toggle on. stop; or play from the marker / loop,
+// or (no marker) from where the last stop happened
+void FurnaceGUI::pianoRollPlayPause() {
+  if (e->isPlaying() && !e->isStepping()) {
+    int o=0, r=0;
+    e->getPlayPos(o,r);
+    stop();
+    pianoRollHasPause=true;
+    pianoRollPauseOrd=o;
+    pianoRollPauseRow=r;
+    return;
+  }
+  if (pianoRollMarker()>=0) {
+    play();
+    return;
+  }
+  if (pianoRollHasPause && pianoRollPauseOrd<e->curSubSong->ordersLen) {
+    curOrder=pianoRollPauseOrd;
+    e->setOrder(pianoRollPauseOrd);
+    play(pianoRollPauseRow);
+  } else {
+    play();
+  }
+}
+
+// E7b: Play / Play-Stop start from here when the "piano roll" toggle is on (see FurnaceGUI::play)
 int FurnaceGUI::pianoRollMarker() {
-  if (!pianoRollOpen || pianoRoll==NULL) return -1;
+  if (!pianoRollTransport || pianoRoll==NULL) return -1;
   int total=e->curSubSong->patLen*e->curSubSong->ordersLen;
   FurnacePianoRoll& pr=*pianoRoll;
   bool loop=(pr.loopIn>=0 && pr.loopOut>pr.loopIn && pr.loopIn<total);
@@ -575,6 +613,14 @@ void FurnaceGUI::drawPianoRoll() {
         ImGui::Text(_("loop %.2X:%.2X - (press O)"),pr.loopIn/pl,pr.loopIn%pl);
       }
     }
+    if (any) {
+      ImGui::SameLine();
+      if (!pianoRollTransport) {
+        ImGui::TextColored(uiColors[GUI_COLOR_WARNING],"%s",_("(off: turn on \"piano roll\" next to Poly)"));
+      } else if (pr.loopIn>=0 && pr.loopOut>pr.loopIn && !e->getRepeatPattern()) {
+        ImGui::TextDisabled("%s",_("(the loop plays with Repeat pattern on)"));
+      }
+    }
   }
 
   // status message (only while there is something to say)
@@ -600,7 +646,7 @@ void FurnaceGUI::drawPianoRoll() {
   if (pr.loopIn>=totalRows) pr.loopIn=-1;
   if (pr.loopOut>totalRows) pr.loopOut=totalRows;
   {
-    bool want=(pr.loopIn>=0 && pr.loopOut>pr.loopIn);
+    bool want=pianoRollTransport && (pr.loopIn>=0 && pr.loopOut>pr.loopIn);
     if (want!=pr.loopApplied || (want && (pr.loopIn!=pr.loopAppliedIn || pr.loopOut!=pr.loopAppliedOut))) {
       e->setRollLoop(want,pr.loopIn,pr.loopOut);
       pr.loopApplied=want;

@@ -754,6 +754,8 @@ void FurnaceGUI::drawEditControls() {
           ImGui::SetTooltip(_("Polyphony"));
         }
         popToggleColors();
+        ImGui::SameLine();
+        drawPianoRollTransportToggle();
       }
       if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) curWindow=GUI_WINDOW_EDIT_CONTROLS;
       ImGui::End();
@@ -874,6 +876,8 @@ void FurnaceGUI::drawEditControls() {
           ImGui::SetTooltip(_("Polyphony"));
         }
         popToggleColors();
+        ImGui::SameLine();
+        drawPianoRollTransportToggle();
       }
       if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) curWindow=GUI_WINDOW_EDIT_CONTROLS;
       ImGui::End();
@@ -1003,6 +1007,8 @@ void FurnaceGUI::drawEditControls() {
           ImGui::SetTooltip(_("Polyphony"));
         }
         popToggleColors();
+        ImGui::SameLine();
+        drawPianoRollTransportToggle();
       }
       if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) curWindow=GUI_WINDOW_EDIT_CONTROLS;
       ImGui::End();
@@ -1093,6 +1099,8 @@ void FurnaceGUI::drawEditControls() {
           ImGui::SetTooltip(_("Polyphony"));
         }
         popToggleColors();
+        ImGui::SameLine();
+        drawPianoRollTransportToggle();
       }
       if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) curWindow=GUI_WINDOW_EDIT_CONTROLS;
       ImGui::End();

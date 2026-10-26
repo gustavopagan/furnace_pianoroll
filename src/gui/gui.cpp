@@ -1177,7 +1177,7 @@ float FurnaceGUI::calcBPM(const DivGroovePattern& speeds, float hz, int vN, int 
 
 void FurnaceGUI::play(int row) {
   // piano roll fork: Play and Play/Stop start from the roll's marker when there is one
-  if (row<0 && !pianoRollIgnoreMarker) {
+  if (row<0 && !pianoRollIgnoreMarker && pianoRollTransport) {
     int mk=pianoRollMarker();
     if (mk>=0 && e->curSubSong->patLen>0) {
       curOrder=mk/e->curSubSong->patLen;
@@ -1493,6 +1493,13 @@ void FurnaceGUI::keyDown(SDL_Event& ev) {
   }
   if (ev.key.keysym.mod&KMOD_SHIFT) {
     mapped|=FURKMOD_SHIFT;
+  }
+
+  // piano roll fork: with the "piano roll" toggle on, Space is play/stop with the roll's transport
+  if (pianoRollTransport && ev.key.keysym.sym==SDLK_SPACE && mapped==SDLK_SPACE && !ev.key.repeat &&
+      !bindSetActive && !ImGuiFileDialog::Instance()->IsOpened() && !ImGui::GetIO().WantTextInput) {
+    pianoRollPlayPause();
+    return;
   }
 
   if (!ImGuiFileDialog::Instance()->IsOpened()) {
@@ -3895,6 +3902,10 @@ bool FurnaceGUI::loop() {
         case SDL_KEYDOWN:
           if (!ImGui::GetIO().WantCaptureKeyboard || (ImGuiFileDialog::Instance()->IsOpened() && !ImGui::GetIO().WantTextInput)) {
             keyDown(ev);
+          } else if (pianoRollTransport && ev.key.keysym.sym==SDLK_SPACE && !ev.key.repeat && !ImGui::GetIO().WantTextInput &&
+                     !ImGuiFileDialog::Instance()->IsOpened() && (ev.key.keysym.mod&(KMOD_CTRL|KMOD_ALT|KMOD_SHIFT|KMOD_GUI))==0) {
+            // piano roll fork: Space is play/stop even while an ImGui window holds the keyboard
+            pianoRollPlayPause();
           }
           if (introPos<11.0 && !shortIntro) {
             if (ev.key.keysym.scancode==SDL_SCANCODE_SPACE || ev.key.keysym.scancode==SDL_SCANCODE_ESCAPE || ev.key.keysym.scancode==SDL_SCANCODE_RETURN) {
@@ -8086,6 +8097,7 @@ void FurnaceGUI::syncState() {
   followOrders=e->getConfBool("followOrders",true);
   followPattern=e->getConfBool("followPattern",true);
   noteInputPoly=e->getConfBool("noteInputPoly",true);
+  pianoRollTransport=e->getConfBool("pianoRollTransport",false);
   audioExportOptions.loops=e->getConfInt("exportLoops",0);
   if (audioExportOptions.loops<0) audioExportOptions.loops=0;
   audioExportOptions.fadeOut=e->getConfDouble("exportFadeOut",0.0);
@@ -8239,6 +8251,7 @@ void FurnaceGUI::commitState(DivConfig& conf) {
   conf.set("followPattern",followPattern);
   conf.set("orderEditMode",orderEditMode);
   conf.set("noteInputPoly",noteInputPoly);
+  conf.set("pianoRollTransport",pianoRollTransport);
   if (settings.persistFadeOut) {
     conf.set("exportLoops",audioExportOptions.loops);
     conf.set("exportFadeOut",audioExportOptions.fadeOut);

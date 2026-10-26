@@ -2902,6 +2902,11 @@ class FurnaceGUI {
   void pianoRollCommit();
   bool pianoRollApplyInstrument(int ins);
   int pianoRollMarker();
+  bool pianoRollTransport=false; // "piano roll" toggle next to Poly: roll transport rules + Space play/stop
+  bool pianoRollHasPause=false;
+  int pianoRollPauseOrd=0, pianoRollPauseRow=0;
+  void pianoRollPlayPause();
+  void drawPianoRollTransportToggle();
   bool pianoRollIgnoreMarker=false;
   void pianoRollSongLoaded(const String& path);
   void pianoRollSongSaved(const String& path);

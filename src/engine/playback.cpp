@@ -28,7 +28,7 @@
 
 void DivEngine::nextOrder() {
   curRow=0;
-  if (repeatPattern) return;
+  if (repeatPattern && !rollLoopOn) return; // piano roll fork: the roll's loop replaces pattern repeat
   if (++curOrder>=curSubSong->ordersLen) {
     logV("end of orders reached");
     endOfSong=true;
@@ -1431,7 +1431,7 @@ void DivEngine::nextRow() {
   walked[((curOrder<<5)+(curRow>>3))&8191]|=1<<(curRow&7);
 
   if (changeOrd!=-1) {
-    if (repeatPattern) {
+    if (repeatPattern && !rollLoopOn) {
       curRow=0;
       changeOrd=-1;
     } else {
@@ -1459,7 +1459,8 @@ void DivEngine::nextRow() {
   }
 
   // piano roll fork: loop between two rows
-  if (rollLoopOn && playing && !skipping && !repeatPattern) {
+  // the loop plays when Repeat pattern is on (the roll's I/O selection takes the place of the pattern)
+  if (rollLoopOn && repeatPattern && playing && !skipping) {
     int nextAbs=curOrder*curSubSong->patLen+curRow;
     bool inside=(rollRowPlayed>=rollLoopStart && rollRowPlayed<rollLoopEnd);
     if (inside && (nextAbs>=rollLoopEnd || nextAbs<=rollRowPlayed)) {

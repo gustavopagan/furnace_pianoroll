@@ -1002,7 +1002,8 @@ class DivEngine {
 
     // set repeat pattern
     void setRepeatPattern(bool value);
-    // piano roll fork: loop playback between absolute rows [startAbs,endAbs) of the current subsong.
+    // piano roll fork: loop playback between absolute rows [startAbs,endAbs) of the current subsong,
+    // only while Repeat pattern is on (then it replaces the pattern repeat).
     // when playback reaches endAbs coming from inside the loop it goes back to startAbs and
     // every channel gets a note off (like ECxx), so notes do not ring across the loop point.
     void setRollLoop(bool on, int startAbs, int endAbs);
