@@ -46,7 +46,8 @@ enum PRDrag {
   PR_DRAG_RESIZE,
   PR_DRAG_CREATE,
   PR_DRAG_RECT,
-  PR_DRAG_ERASE
+  PR_DRAG_ERASE,
+  PR_DRAG_PORTA
 };
 
 enum PRLaneDrag {
@@ -87,6 +88,8 @@ struct FurnacePianoRoll {
   std::set<int> eraseSet;
   ImVec2 rectA, rectB;    // rubber band in content coordinates
   int lastLen;
+  int portaNote;          // start row of the note whose portamento anchor is being dragged
+  int portaNewSpeed;
 
   // pending edit (prApplyEdit arguments), committed by pianoRollCommit()
   std::vector<int> pendRem;
@@ -133,6 +136,7 @@ struct FurnacePianoRoll {
     createRow(0), createPitch(0), lastLen(1),
     repeatMode(PR_REPEAT_ASK), repeatPopup(false), repeatPopupCount(0),
     previewNote(-999), statusTime(-100.0), prefsLoaded(false) {
+    portaNote=-1; portaNewSpeed=0;
     focusRow=-1; laneFx=-1; lanes=true; focusFxField=false; focusValField=false;
     laneDrag=0; laneLastRow=-1; laneLastVal=0;
     addFxCode[0]=0;
@@ -1092,6 +1096,105 @@ void FurnaceGUI::drawPianoRoll() {
       pr.centerPending=false;
     }
 
+    auto ticksPerRow=[&](int r) -> float {
+      int len=MAX(1,(int)sub->speeds.len);
+      return (float)MAX(1,sub->speeds.val[r%len]*(sub->timeBase+1));
+    };
+    auto noteX0=[&](const PRNote& n) -> float {
+      float x=n.start*zX;
+      if (n.delayTicks>0) x+=zX*MIN(1.0f,(float)n.delayTicks/ticksPerRow(n.start));
+      return x;
+    };
+    auto noteX1=[&](const PRNote& n) -> float {
+      float x=n.end*zX;
+      if (n.cutRow>=0) {
+        float cx=n.cutRow*zX+zX*MIN(1.0f,(float)n.cutTicks/ticksPerRow(n.cutRow));
+        if (cx<x) x=cx;
+      }
+      return x;
+    };
+
+    // portamento (03xx on the start row of a note): how the pitch travels from the previous note.
+    // in linear pitch mode (the default), the engine moves the pitch by speed*pitchSlideSpeed
+    // units per tick, with 128 units per semitone (DivEngine::calcBaseFreq, playback.cpp case 0x03),
+    // so the length of the slide is exact. other pitch modes depend on the chip: drawn dashed.
+    struct PRPorta {
+      int speed;        // 03xx value (0: none)
+      int prev;         // index of the note it slides from (-1: nothing sounding -> no slide)
+      int ticks;        // ticks to reach the target
+      bool exact;
+      PRPorta(): speed(0), prev(-1), ticks(0), exact(true) {}
+    };
+    std::vector<PRPorta> portas(notes.size());
+    int effColsGrid=MIN(DIV_MAX_EFFECTS,MAX(1,(int)sub->pat[pr.chan].effectCols));
+    for (size_t i=0; i<notes.size(); i++) {
+      const PRNote& n=notes[i];
+      int sp=prFindEffect(src.rowAt(src.patAt(n.start/patLen),n.start%patLen),effColsGrid,0x03);
+      if (sp<=0) continue;
+      PRPorta& pt=portas[i];
+      pt.speed=sp;
+      if (i>0 && notes[i-1].end==n.start && notes[i-1].endType==PR_END_NEXT) {
+        pt.prev=(int)i-1;
+        int units=abs(n.pitch-notes[i-1].pitch)*128;
+        int rate=sp*((e->song.linearPitch==2)?MAX(1,(int)e->song.pitchSlideSpeed):1);
+        pt.ticks=(units+rate-1)/rate+(e->song.noSlidesOnFirstTick?1:0);
+        pt.exact=(e->song.linearPitch==2);
+      }
+    }
+    // x (content coordinates) of a point `ticks` ticks after the start of row r
+    auto tickToX=[&](int r, float ticks) -> float {
+      while (r<totalRows && ticks>=ticksPerRow(r)) {
+        ticks-=ticksPerRow(r);
+        r++;
+      }
+      if (r>=totalRows) return totalRows*zX;
+      return r*zX+zX*(ticks/ticksPerRow(r));
+    };
+
+    // inverse of tickToX: ticks after the start of row r for content x
+    auto xToTicks=[&](int r, float x) -> float {
+      float t=0;
+      while (r<totalRows && x>=(r+1)*zX) {
+        t+=ticksPerRow(r);
+        r++;
+      }
+      if (r>=totalRows) return t;
+      return t+MAX(0.0f,(x-r*zX)/zX)*ticksPerRow(r);
+    };
+    // the speed that makes a slide of `semis` semitones last about `ticks` ticks
+    auto portaSpeedFor=[&](int semis, float ticks) -> int {
+      int pss=(e->song.linearPitch==2)?MAX(1,(int)e->song.pitchSlideSpeed):1;
+      int t=(int)roundf(ticks)-(e->song.noSlidesOnFirstTick?1:0);
+      if (t<1) t=1;
+      int units=abs(semis)*128;
+      int sp=(units+t*pss-1)/(t*pss);
+      return CLAMP(sp,1,255);
+    };
+    auto portaTicksFor=[&](int semis, int sp) -> int {
+      int pss=(e->song.linearPitch==2)?MAX(1,(int)e->song.pitchSlideSpeed):1;
+      int units=abs(semis)*128;
+      int rate=MAX(1,sp*pss);
+      return (units+rate-1)/rate+(e->song.noSlidesOnFirstTick?1:0);
+    };
+
+    // portamento anchors: the end of each ramp can be dragged to change the 03xx value
+    int anchorHot=-1;
+    auto anchorPos=[&](size_t i, int ticks) -> ImVec2 {
+      const PRNote& n=notes[i];
+      int a=axisIndex[CLAMP(n.pitch,0,179)];
+      return ImVec2(org.x+tickToX(n.start,(float)(n.delayTicks+ticks)),org.y+a*zY+zY*0.5f);
+    };
+    if (gridHovered && pr.drag==PR_DRAG_NONE) {
+      float best=7.0f*dpiScale;
+      for (size_t i=0; i<notes.size(); i++) {
+        if (portas[i].speed<=0 || portas[i].prev<0) continue;
+        if (axisIndex[CLAMP(notes[i].pitch,0,179)]<0) continue;
+        ImVec2 ap=anchorPos(i,portas[i].ticks);
+        float d=sqrtf((io.MousePos.x-ap.x)*(io.MousePos.x-ap.x)+(io.MousePos.y-ap.y)*(io.MousePos.y-ap.y));
+        if (d<best) { best=d; anchorHot=(int)i; }
+      }
+    }
+
     // ---------- mouse editing ----------
     float mRowF=(io.MousePos.x-org.x)/zX;
     float mAxF=(io.MousePos.y-org.y)/zY;
@@ -1145,6 +1248,20 @@ void FurnaceGUI::drawPianoRoll() {
       pr.previewNote=-999;
     };
 
+    if (anchorHot>=0 && pr.drag==PR_DRAG_NONE) {
+      ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        ImGui::SetWindowFocus();
+        pr.drag=PR_DRAG_PORTA;
+        pr.portaNote=notes[anchorHot].start;
+        pr.portaNewSpeed=portas[anchorHot].speed;
+        pr.sel.clear();
+        pr.sel.insert(notes[anchorHot].start);
+        pr.focusRow=-1;
+      } else {
+        ImGui::SetTooltip(_("portamento 03%.2X: %d tick(s)\ndrag left or right to change the speed"),portas[anchorHot].speed,portas[anchorHot].ticks);
+      }
+    }
     // double click on a note: go to the "add effect" field (checked apart from the drag state,
     // which may still be finishing the first click on a slow frame)
     if (gridHovered && hitIdx>=0 && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
@@ -1224,6 +1341,18 @@ void FurnaceGUI::drawPianoRoll() {
         case PR_DRAG_ERASE:
           if (hitIdx>=0) pr.eraseSet.insert(notes[hitIdx].start);
           break;
+        case PR_DRAG_PORTA: {
+          ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+          for (size_t i=0; i<notes.size(); i++) {
+            if (notes[i].start!=pr.portaNote || portas[i].prev<0) continue;
+            int semis=notes[i].pitch-notes[portas[i].prev].pitch;
+            float t=xToTicks(notes[i].start,io.MousePos.x-org.x)-(float)notes[i].delayTicks;
+            pr.portaNewSpeed=portaSpeedFor(semis,t);
+            ImGui::SetTooltip(_("portamento 03%.2X: %d tick(s)"),pr.portaNewSpeed,portaTicksFor(semis,pr.portaNewSpeed));
+            break;
+          }
+          break;
+        }
       }
       // autoscroll near the edges while dragging
       if (io.MousePos.x>viewMax.x-8.0f*dpiScale) ImGui::SetScrollX(pr.scrollX+zX);
@@ -1306,6 +1435,18 @@ void FurnaceGUI::drawPianoRoll() {
             float ny0=a*zY, ny1=ny0+zY;
             if (nx1>rx0 && nx0<rx1 && ny1>ry0 && ny0<ry1) pr.sel.insert(n.start);
           }
+          break;
+        }
+        case PR_DRAG_PORTA: {
+          int row=pr.portaNote, sp=pr.portaNewSpeed;
+          bool changed=false;
+          for (size_t i=0; i<notes.size(); i++) {
+            if (notes[i].start==row && portas[i].speed!=sp) changed=true;
+          }
+          if (changed && sp>0) {
+            queueOp([row,sp](PREditCtx& c) -> bool { return prSetEffectValueWherePresent(c,{row},0x03,sp); });
+          }
+          pr.portaNote=-1;
           break;
         }
         case PR_DRAG_ERASE:
@@ -1410,24 +1551,6 @@ void FurnaceGUI::drawPianoRoll() {
       dl->AddLine(ImVec2(x,viewMin.y),ImVec2(x,viewMax.y),c,(rr==0)?2.0f*dpiScale:1.0f);
     }
 
-    auto ticksPerRow=[&](int r) -> float {
-      int len=MAX(1,(int)sub->speeds.len);
-      return (float)MAX(1,sub->speeds.val[r%len]*(sub->timeBase+1));
-    };
-    auto noteX0=[&](const PRNote& n) -> float {
-      float x=n.start*zX;
-      if (n.delayTicks>0) x+=zX*MIN(1.0f,(float)n.delayTicks/ticksPerRow(n.start));
-      return x;
-    };
-    auto noteX1=[&](const PRNote& n) -> float {
-      float x=n.end*zX;
-      if (n.cutRow>=0) {
-        float cx=n.cutRow*zX+zX*MIN(1.0f,(float)n.cutTicks/ticksPerRow(n.cutRow));
-        if (cx<x) x=cx;
-      }
-      return x;
-    };
-
     if (pr.ghost) {
       ImU32 colGhost=ImGui::GetColorU32(ImVec4(0.75f,0.75f,0.75f,0.22f));
       for (auto& g: ghosts) {
@@ -1453,43 +1576,6 @@ void FurnaceGUI::drawPianoRoll() {
     ImU32 colRel=ImGui::GetColorU32(ImVec4(1.0f,0.85f,0.3f,0.95f));
     ImU32 colDiamond=ImGui::GetColorU32(ImVec4(1.0f,1.0f,1.0f,0.95f));
     ImU32 colErase=ImGui::GetColorU32(ImVec4(1.0f,0.25f,0.25f,0.9f));
-    // portamento (03xx on the start row of a note): how the pitch travels from the previous note.
-    // in linear pitch mode (the default), the engine moves the pitch by speed*pitchSlideSpeed
-    // units per tick, with 128 units per semitone (DivEngine::calcBaseFreq, playback.cpp case 0x03),
-    // so the length of the slide is exact. other pitch modes depend on the chip: drawn dashed.
-    struct PRPorta {
-      int speed;        // 03xx value (0: none)
-      int prev;         // index of the note it slides from (-1: nothing sounding -> no slide)
-      int ticks;        // ticks to reach the target
-      bool exact;
-      PRPorta(): speed(0), prev(-1), ticks(0), exact(true) {}
-    };
-    std::vector<PRPorta> portas(notes.size());
-    int effColsGrid=MIN(DIV_MAX_EFFECTS,MAX(1,(int)sub->pat[pr.chan].effectCols));
-    for (size_t i=0; i<notes.size(); i++) {
-      const PRNote& n=notes[i];
-      int sp=prFindEffect(src.rowAt(src.patAt(n.start/patLen),n.start%patLen),effColsGrid,0x03);
-      if (sp<=0) continue;
-      PRPorta& pt=portas[i];
-      pt.speed=sp;
-      if (i>0 && notes[i-1].end==n.start && notes[i-1].endType==PR_END_NEXT) {
-        pt.prev=(int)i-1;
-        int units=abs(n.pitch-notes[i-1].pitch)*128;
-        int rate=sp*((e->song.linearPitch==2)?MAX(1,(int)e->song.pitchSlideSpeed):1);
-        pt.ticks=(units+rate-1)/rate+(e->song.noSlidesOnFirstTick?1:0);
-        pt.exact=(e->song.linearPitch==2);
-      }
-    }
-    // x (content coordinates) of a point `ticks` ticks after the start of row r
-    auto tickToX=[&](int r, float ticks) -> float {
-      while (r<totalRows && ticks>=ticksPerRow(r)) {
-        ticks-=ticksPerRow(r);
-        r++;
-      }
-      if (r>=totalRows) return totalRows*zX;
-      return r*zX+zX*(ticks/ticksPerRow(r));
-    };
-
     for (size_t ni=0; ni<notes.size(); ni++) {
       const PRNote& n=notes[ni];
       if (n.end<firstRow || n.start>lastRow) continue;
@@ -1584,8 +1670,11 @@ void FurnaceGUI::drawPianoRoll() {
         float yP=pitchY(p.pitch);
         if (yP<0) continue;
         float xp=org.x+noteX0(p);
+        int ticksDraw=pt.ticks;
+        bool dragging=(pr.drag==PR_DRAG_PORTA && pr.portaNote==n.start);
+        if (dragging) ticksDraw=portaTicksFor(n.pitch-p.pitch,pr.portaNewSpeed);
         float x0=org.x+tickToX(n.start,(float)n.delayTicks);
-        float x1=org.x+tickToX(n.start,(float)(n.delayTicks+pt.ticks));
+        float x1=org.x+tickToX(n.start,(float)(n.delayTicks+ticksDraw));
         dl->AddLine(ImVec2(xp,yP),ImVec2(x0,yP),colPorta,th);
         // the note may end before the slide is over
         ImVec2 rampEnd=ImVec2(x1,yT);
@@ -1596,6 +1685,16 @@ void FurnaceGUI::drawPianoRoll() {
         if (pt.exact) dl->AddLine(ImVec2(x0,yP),rampEnd,colPorta,th);
         else dashed(ImVec2(x0,yP),rampEnd);
         if (rampEnd.x<xe) dl->AddLine(rampEnd,ImVec2(xe,yT),colPorta,th);
+        // the anchor: where the slide reaches the new pitch (may be past the end of the note)
+        if (x1>xe) dashed(rampEnd,ImVec2(x1,yT));
+        float ar=((int)i==anchorHot || dragging)?5.0f*dpiScale:3.5f*dpiScale;
+        dl->AddCircleFilled(ImVec2(x1,yT),ar,colPorta);
+        dl->AddCircle(ImVec2(x1,yT),ar,ImGui::GetColorU32(ImVec4(0,0,0,0.8f)),0,1.0f*dpiScale);
+        if (dragging) {
+          char buf[16];
+          snprintf(buf,15,"03%.2X",pr.portaNewSpeed);
+          dl->AddText(ImVec2(x1+6.0f*dpiScale,yT-ImGui::GetFontSize()-2.0f*dpiScale),colPorta,buf);
+        }
       }
     }
 
