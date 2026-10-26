@@ -932,7 +932,7 @@ void FurnaceGUI::drawPianoRoll() {
     ImGui::SameLine();
     ImGui::TextUnformatted(_("Add"));
     ImGui::SameLine();
-    if (pr.focusFxField) {
+    if (pr.focusFxField && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
       ImGui::SetKeyboardFocusHere();
       pr.focusFxField=false;
     }
@@ -979,8 +979,8 @@ void FurnaceGUI::drawPianoRoll() {
     if (apply || valEnter || addEnter) {
       unsigned int c=0, v=0;
       bool okC=(sscanf(pr.addFxCode,"%x",&c)==1 && c<=255);
-      bool okV=(pr.addFxVal[0]==0) || (sscanf(pr.addFxVal,"%x",&v)==1 && v<=255);
-      if (addEnter && pr.addFxVal[0]==0) {
+      bool okV=(sscanf(pr.addFxVal,"%x",&v)==1 && v<=255);
+      if (addEnter && !apply && !valEnter) {
         // Enter on the effect field: move on to the value
         pr.focusValField=true;
       } else if (okC && okV) {
@@ -1145,11 +1145,19 @@ void FurnaceGUI::drawPianoRoll() {
       pr.previewNote=-999;
     };
 
+    // double click on a note: go to the "add effect" field (checked apart from the drag state,
+    // which may still be finishing the first click on a slow frame)
+    if (gridHovered && hitIdx>=0 && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+      pr.focusFxField=true;
+      if (!pr.sel.count(notes[hitIdx].start)) {
+        pr.sel.clear();
+        pr.sel.insert(notes[hitIdx].start);
+      }
+    }
     // mouse down
     if (gridHovered && pr.drag==PR_DRAG_NONE && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       ImGui::SetWindowFocus();
       pr.focusRow=-1;
-      if (hitIdx>=0 && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) pr.focusFxField=true;
       pr.dragMouseRow0=mRowF;
       pr.dragMouseAx0=mAxF;
       pr.dragDRow=0; pr.dragDPitch=0; pr.dragDLen=0;
@@ -1445,7 +1453,45 @@ void FurnaceGUI::drawPianoRoll() {
     ImU32 colRel=ImGui::GetColorU32(ImVec4(1.0f,0.85f,0.3f,0.95f));
     ImU32 colDiamond=ImGui::GetColorU32(ImVec4(1.0f,1.0f,1.0f,0.95f));
     ImU32 colErase=ImGui::GetColorU32(ImVec4(1.0f,0.25f,0.25f,0.9f));
-    for (const PRNote& n: notes) {
+    // portamento (03xx on the start row of a note): how the pitch travels from the previous note.
+    // in linear pitch mode (the default), the engine moves the pitch by speed*pitchSlideSpeed
+    // units per tick, with 128 units per semitone (DivEngine::calcBaseFreq, playback.cpp case 0x03),
+    // so the length of the slide is exact. other pitch modes depend on the chip: drawn dashed.
+    struct PRPorta {
+      int speed;        // 03xx value (0: none)
+      int prev;         // index of the note it slides from (-1: nothing sounding -> no slide)
+      int ticks;        // ticks to reach the target
+      bool exact;
+      PRPorta(): speed(0), prev(-1), ticks(0), exact(true) {}
+    };
+    std::vector<PRPorta> portas(notes.size());
+    int effColsGrid=MIN(DIV_MAX_EFFECTS,MAX(1,(int)sub->pat[pr.chan].effectCols));
+    for (size_t i=0; i<notes.size(); i++) {
+      const PRNote& n=notes[i];
+      int sp=prFindEffect(src.rowAt(src.patAt(n.start/patLen),n.start%patLen),effColsGrid,0x03);
+      if (sp<=0) continue;
+      PRPorta& pt=portas[i];
+      pt.speed=sp;
+      if (i>0 && notes[i-1].end==n.start && notes[i-1].endType==PR_END_NEXT) {
+        pt.prev=(int)i-1;
+        int units=abs(n.pitch-notes[i-1].pitch)*128;
+        int rate=sp*((e->song.linearPitch==2)?MAX(1,(int)e->song.pitchSlideSpeed):1);
+        pt.ticks=(units+rate-1)/rate+(e->song.noSlidesOnFirstTick?1:0);
+        pt.exact=(e->song.linearPitch==2);
+      }
+    }
+    // x (content coordinates) of a point `ticks` ticks after the start of row r
+    auto tickToX=[&](int r, float ticks) -> float {
+      while (r<totalRows && ticks>=ticksPerRow(r)) {
+        ticks-=ticksPerRow(r);
+        r++;
+      }
+      if (r>=totalRows) return totalRows*zX;
+      return r*zX+zX*(ticks/ticksPerRow(r));
+    };
+
+    for (size_t ni=0; ni<notes.size(); ni++) {
+      const PRNote& n=notes[ni];
       if (n.end<firstRow || n.start>lastRow) continue;
       int a=axisIndex[n.pitch];
       if (a<firstAx || a>=lastAx) continue;
@@ -1483,11 +1529,73 @@ void FurnaceGUI::drawPianoRoll() {
         if (n.endType==PR_END_NEXT) endName=_("next note");
         if (n.endType==PR_END_OFF) endName="OFF";
         if (n.endType==PR_END_REL) endName="REL";
-        ImGui::SetTooltip("%s  %.2X:%.2X - %.2X:%.2X  (%d)\n%s %.2X%s\n%s: %s",
+        String portaTip;
+        const PRPorta& pt=portas[ni];
+        if (pt.speed>0) {
+          if (pt.prev<0) {
+            portaTip=fmt::sprintf(_("\nportamento 03%.2X: no note is sounding right before this one, so there is nothing to slide from"),pt.speed);
+          } else {
+            portaTip=fmt::sprintf(_("\nportamento 03%.2X: slides from the previous note in %d tick(s)%s"),pt.speed,pt.ticks,pt.exact?"":_(" (approximate: this song does not use linear pitch)"));
+          }
+        }
+        ImGui::SetTooltip("%s  %.2X:%.2X - %.2X:%.2X  (%d)\n%s %.2X%s\n%s: %s%s",
           noteName(nn,oo),
           n.start/patLen,n.start%patLen,n.end/patLen,n.end%patLen,n.end-n.start,
           _("instrument"),(n.ins<0)?0:n.ins,n.insExplicit?"":_(" (inherited)"),
-          _("ends by"),endName);
+          _("ends by"),endName,portaTip.c_str());
+      }
+    }
+
+    // portamento line: runs through the previous note at its pitch, ramps to the new pitch
+    // over the length of the slide, then runs through the note with the 03xx
+    {
+      ImU32 colPorta=ImGui::GetColorU32(uiColors[fxColors[0x03]]);
+      float th=2.0f*dpiScale;
+      auto pitchY=[&](int p) -> float {
+        int a=axisIndex[CLAMP(p,0,179)];
+        if (a<0) return -1.0f;
+        return org.y+a*zY+zY*0.5f;
+      };
+      auto dashed=[&](ImVec2 a, ImVec2 b) {
+        float len=sqrtf((b.x-a.x)*(b.x-a.x)+(b.y-a.y)*(b.y-a.y));
+        float seg=4.0f*dpiScale;
+        int nseg=MAX(1,(int)(len/seg));
+        for (int k=0; k<nseg; k+=2) {
+          float t0=(float)k/nseg, t1=(float)MIN(k+1,nseg)/nseg;
+          dl->AddLine(ImVec2(a.x+(b.x-a.x)*t0,a.y+(b.y-a.y)*t0),ImVec2(a.x+(b.x-a.x)*t1,a.y+(b.y-a.y)*t1),colPorta,th);
+        }
+      };
+      for (size_t i=0; i<notes.size(); i++) {
+        const PRPorta& pt=portas[i];
+        if (pt.speed<=0) continue;
+        const PRNote& n=notes[i];
+        if (n.end<firstRow || (pt.prev>=0?notes[pt.prev].start:n.start)>lastRow) continue;
+        float yT=pitchY(n.pitch);
+        if (yT<0) continue;
+        float xs=org.x+noteX0(n);
+        float xe=org.x+noteX1(n);
+        if (pt.prev<0) {
+          // 03xx with nothing to slide from: a hollow marker at the start of the note
+          float r=MIN(zY*0.35f,6.0f*dpiScale);
+          dl->AddCircle(ImVec2(xs+r+2.0f*dpiScale,yT),r,colPorta,0,1.5f*dpiScale);
+          continue;
+        }
+        const PRNote& p=notes[pt.prev];
+        float yP=pitchY(p.pitch);
+        if (yP<0) continue;
+        float xp=org.x+noteX0(p);
+        float x0=org.x+tickToX(n.start,(float)n.delayTicks);
+        float x1=org.x+tickToX(n.start,(float)(n.delayTicks+pt.ticks));
+        dl->AddLine(ImVec2(xp,yP),ImVec2(x0,yP),colPorta,th);
+        // the note may end before the slide is over
+        ImVec2 rampEnd=ImVec2(x1,yT);
+        if (xe<x1 && x1>x0) {
+          float t=(xe-x0)/(x1-x0);
+          rampEnd=ImVec2(xe,yP+(yT-yP)*t);
+        }
+        if (pt.exact) dl->AddLine(ImVec2(x0,yP),rampEnd,colPorta,th);
+        else dashed(ImVec2(x0,yP),rampEnd);
+        if (rampEnd.x<xe) dl->AddLine(rampEnd,ImVec2(xe,yT),colPorta,th);
       }
     }
 
