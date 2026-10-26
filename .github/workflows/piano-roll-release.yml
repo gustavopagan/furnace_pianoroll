@@ -1,0 +1,154 @@
+# piano roll fork: builds Linux, macOS (Intel and Apple Silicon) and Windows packages.
+# runs on pushes to the piano-roll branch, on tags "pr-*" (which also create a GitHub release)
+# and by hand (Actions > Piano roll release > Run workflow).
+name: Piano roll release
+
+on:
+  push:
+    branches: [piano-roll]
+    tags: ['pr-*']
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  BUILD_TYPE: Release
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        config:
+          - { name: 'macOS x86_64', os: macos-13, arch: x86_64, kind: mac }
+          - { name: 'macOS ARM', os: macos-14, arch: arm64, kind: mac }
+          - { name: 'Linux x86_64', os: ubuntu-22.04, arch: x86_64, kind: linux }
+          - { name: 'Windows x86_64', os: ubuntu-22.04, arch: x86_64, kind: mingw }
+      fail-fast: false
+
+    name: ${{ matrix.config.name }}
+    runs-on: ${{ matrix.config.os }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Package name
+      id: pkg
+      run: |
+        name="furnace-piano-roll-${GITHUB_REF_NAME//\//-}"
+        case '${{ matrix.config.kind }}' in
+          mac) name="${name}-macOS-${{ matrix.config.arch }}"; file="${name}.dmg" ;;
+          linux) name="${name}-Linux-${{ matrix.config.arch }}"; file="${name}.tar.gz" ;;
+          mingw) name="${name}-Windows-${{ matrix.config.arch }}"; file="${name}.zip" ;;
+        esac
+        echo "name=${name}" >> $GITHUB_OUTPUT
+        echo "file=${file}" >> $GITHUB_OUTPUT
+
+    - name: Dependencies [Linux]
+      if: ${{ matrix.config.kind == 'linux' }}
+      run: |
+        sudo apt update
+        sudo apt install -y libsdl2-dev libasound2-dev libgl-dev gettext ninja-build
+
+    - name: Dependencies [Windows MinGW]
+      if: ${{ matrix.config.kind == 'mingw' }}
+      run: |
+        sudo apt update
+        sudo apt install -y mingw-w64 mingw-w64-tools gettext ninja-build
+
+    - name: Language files
+      if: ${{ matrix.config.kind != 'mac' }}
+      run: ./scripts/build-po.sh
+
+    - name: Configure
+      run: |
+        extra=()
+        case '${{ matrix.config.kind }}' in
+          mac)
+            if [ '${{ matrix.config.arch }}' == 'arm64' ]; then
+              extra+=('-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0' '-DCMAKE_OSX_ARCHITECTURES=arm64' '-DMAKE_BUNDLE=ON')
+            else
+              extra+=('-DCMAKE_OSX_DEPLOYMENT_TARGET=10.9' '-DCMAKE_OSX_ARCHITECTURES=x86_64' '-DMAKE_BUNDLE=ON' '-DCMAKE_C_FLAGS=-march=core2' '-DCMAKE_CXX_FLAGS=-march=core2')
+            fi
+            ;;
+          linux)
+            extra+=('-G' 'Ninja' '-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc')
+            ;;
+          mingw)
+            extra+=('-G' 'Ninja' '-DCMAKE_TOOLCHAIN_FILE=scripts/Cross-MinGW-x86_64.cmake' '-DWITH_LOCALE=ON' '-DUSE_MOMO=ON' '-DUSE_BACKWARD=OFF' '-DSUPPORT_VISTA=ON')
+            ;;
+        esac
+        cmake -B build -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+          -DWARNINGS_ARE_ERRORS=OFF -DWITH_DEMOS=OFF -DWITH_INSTRUMENTS=OFF -DWITH_WAVETABLES=OFF \
+          "${extra[@]}"
+
+    - name: Build
+      run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel 3
+
+    - name: Package [macOS]
+      if: ${{ matrix.config.kind == 'mac' }}
+      run: |
+        ./scripts/build-po.sh || true
+        pushd build
+        mkdir -p Furnace.app/Contents/Resources
+        cp -r ../po/locale Furnace.app/Contents/Resources/locale
+        cp ../res/icon.icns Furnace.app/Contents/Resources/Furnace.icns
+        codesign --deep -f -s - Furnace.app
+        mkdir new
+        cp -r Furnace.app new/Furnace.app
+        ln -s /Applications new/Applications
+        cp ../LICENSE new/LICENSE.txt
+        cp ../doc/piano-roll/README.md ../doc/piano-roll/README.pt-BR.md ../doc/piano-roll/piano-roll-demo.gif new/
+        cp -r ../demos ../instruments ../wavetables new/
+        sync
+        for i in 1 2 3 4 5 6; do
+          hdiutil create -srcfolder new -volname "Furnace piano roll" -format UDZO -fs HFS+ furnace.dmg && break
+          sleep 5
+        done
+        mv furnace.dmg ../${{ steps.pkg.outputs.file }}
+        popd
+
+    - name: Package [Linux]
+      if: ${{ matrix.config.kind == 'linux' }}
+      run: |
+        d=${{ steps.pkg.outputs.name }}
+        mkdir -p $d
+        strip -s build/furnace
+        cp build/furnace $d/
+        cp -r po/locale $d/locale
+        cp -r demos instruments wavetables $d/
+        cp LICENSE $d/LICENSE.txt
+        cp doc/piano-roll/README.md doc/piano-roll/README.pt-BR.md doc/piano-roll/piano-roll-demo.gif BUILD.md $d/
+        tar -czf ${{ steps.pkg.outputs.file }} $d
+
+    - name: Package [Windows]
+      if: ${{ matrix.config.kind == 'mingw' }}
+      run: |
+        d=${{ steps.pkg.outputs.name }}
+        mkdir -p $d
+        x86_64-w64-mingw32-strip -s build/furnace.exe -o $d/furnace.exe
+        cp -r po/locale $d/locale
+        cp -r demos instruments wavetables $d/
+        cp LICENSE $d/LICENSE.txt
+        cp doc/piano-roll/README.md doc/piano-roll/README.pt-BR.md doc/piano-roll/piano-roll-demo.gif BUILD.md $d/
+        zip -qr ${{ steps.pkg.outputs.file }} $d
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.pkg.outputs.name }}
+        path: ${{ steps.pkg.outputs.file }}
+
+    - name: Release
+      if: ${{ startsWith(github.ref, 'refs/tags/pr-') }}
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ${{ steps.pkg.outputs.file }}
+        body_path: doc/piano-roll/README.md
