@@ -29,7 +29,7 @@ jobs:
     strategy:
       matrix:
         config:
-          - { name: 'macOS x86_64', os: macos-13, arch: x86_64, kind: mac }
+          - { name: 'macOS x86_64', os: macos-14, arch: x86_64, kind: mac }
           - { name: 'macOS ARM', os: macos-14, arch: arm64, kind: mac }
           - { name: 'Linux x86_64', os: ubuntu-22.04, arch: x86_64, kind: linux }
           - { name: 'Windows x86_64', os: ubuntu-22.04, arch: x86_64, kind: mingw }
@@ -82,7 +82,7 @@ jobs:
             if [ '${{ matrix.config.arch }}' == 'arm64' ]; then
               extra+=('-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0' '-DCMAKE_OSX_ARCHITECTURES=arm64' '-DMAKE_BUNDLE=ON')
             else
-              extra+=('-DCMAKE_OSX_DEPLOYMENT_TARGET=10.9' '-DCMAKE_OSX_ARCHITECTURES=x86_64' '-DMAKE_BUNDLE=ON' '-DCMAKE_C_FLAGS=-march=core2' '-DCMAKE_CXX_FLAGS=-march=core2')
+              extra+=('-DCMAKE_OSX_DEPLOYMENT_TARGET=10.13' '-DCMAKE_OSX_ARCHITECTURES=x86_64' '-DMAKE_BUNDLE=ON' '-DCMAKE_C_FLAGS=-march=core2' '-DCMAKE_CXX_FLAGS=-march=core2')
             fi
             ;;
           linux)
