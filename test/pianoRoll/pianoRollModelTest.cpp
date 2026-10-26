@@ -764,6 +764,66 @@ int main() {
     CHECK(c.row(0,8)[PR_COL_FXVAL(0)]==0x22);
   }
   {
+    TEST("E8 nota nova com início e fim dentro da linha: EDxx e ECxx");
+    FakeChan c(32,{0},2);
+    PREditCtx x=c.ctx();
+    std::vector<int> ref;
+    // começa 2 ticks dentro da linha 4, termina 3 ticks dentro da linha 7
+    CHECK(prMoveNotes(x,{PRMove(-1,PRNoteSpec(4,8,C4,1),false,2,3)},PR_PITCH_OFF,&ref));
+    CHECK(ref.empty());
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==1 && n[0].start==4 && n[0].end==8);
+    CHECK(n[0].delayTicks==2);
+    CHECK(n[0].cutRow==7 && n[0].cutTicks==3);
+  }
+  {
+    TEST("E8 início e fim na mesma linha precisam de duas colunas");
+    FakeChan c(32,{0},2);
+    PREditCtx x=c.ctx();
+    std::vector<int> ref;
+    CHECK(prMoveNotes(x,{PRMove(-1,PRNoteSpec(4,5,C4,1),false,1,4)},PR_PITCH_OFF,&ref));
+    CHECK(ref.empty());
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==1 && n[0].delayTicks==1 && n[0].cutRow==4 && n[0].cutTicks==4);
+    FakeChan d(32,{0},1);
+    PREditCtx y=d.ctx();
+    std::vector<int> ref2;
+    prMoveNotes(y,{PRMove(-1,PRNoteSpec(4,5,C4,1),false,1,4)},PR_PITCH_OFF,&ref2);
+    CHECK(ref2.size()==1); // o chamador recusa a edição inteira
+  }
+  {
+    TEST("E8 mover com ticks troca o ED/EC antigos pelos novos");
+    FakeChan c(32,{0},2);
+    c.note(0,4,C4,1); c.fx(0,4,0,0xed,2); c.fx(0,4,1,0x08,0x11); c.fx(0,7,0,0xec,3); c.note(0,8,PR_PITCH_OFF);
+    PREditCtx x=c.ctx();
+    std::vector<int> ref;
+    CHECK(prMoveNotes(x,{PRMove(4,PRNoteSpec(10,14,C4,1),false,0,5)},PR_PITCH_OFF,&ref));
+    CHECK(ref.empty());
+    CHECK(c.row(0,4)[PR_COL_FX(0)]==-1 && c.row(0,7)[PR_COL_FX(0)]==-1);
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==1 && n[0].start==10 && n[0].delayTicks==0);
+    CHECK(n[0].cutRow==13 && n[0].cutTicks==5);
+    auto e10=prRowEffects(c.row(0,10),2);
+    bool has08=false, hasED=false;
+    for (auto& f: e10) { if (f.fx==0x08) has08=true; if (f.fx==0xed) hasED=true; }
+    CHECK(has08 && !hasED);
+  }
+  {
+    TEST("E8 redimensionar com ticks: só o ECxx muda");
+    FakeChan c(32,{0},2);
+    c.note(0,4,C4,1); c.fx(0,4,0,0xed,2); c.note(0,8,PR_PITCH_OFF);
+    PREditCtx x=c.ctx();
+    std::vector<int> ref;
+    CHECK(prMoveNotes(x,{PRMove(4,PRNoteSpec(4,10,C4,1),false,-1,2)},PR_PITCH_OFF,&ref));
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==1 && n[0].end==10 && n[0].delayTicks==2 && n[0].cutRow==9 && n[0].cutTicks==2);
+    // de volta ao limite da linha: sem ECxx
+    PREditCtx y=c.ctx();
+    CHECK(prMoveNotes(y,{PRMove(4,PRNoteSpec(4,9,C4,1),false,-1,0)},PR_PITCH_OFF,&ref));
+    auto m=prReadChannel(c.src());
+    CHECK(m.size()==1 && m[0].end==9 && m[0].cutRow==-1);
+  }
+  {
     TEST("prefs: ida e volta em JSON (OFF/REL, fold, nomes com acento e aspas)");
     PRPrefs a;
     a.get(0).endRel=true;

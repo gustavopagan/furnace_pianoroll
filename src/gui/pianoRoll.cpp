@@ -50,6 +50,12 @@ enum PRDrag {
   PR_DRAG_PORTA
 };
 
+enum PRSnap {
+  PR_SNAP_ROW=0,
+  PR_SNAP_HALF,
+  PR_SNAP_TICK
+};
+
 enum PRLaneDrag {
   PR_LANE_NONE=0,
   PR_LANE_VOL_PAINT,
@@ -94,6 +100,10 @@ struct FurnacePianoRoll {
   int loopAppliedIn, loopAppliedOut;
   int seenOrd, seenRow, seenChan; // E7: last tracker cursor seen
   int revealRow;          // E7: scroll the roll to show this row (-1: none)
+  int snap;               // E8: PR_SNAP_*
+  int nameEditPitch;      // E8: row being named (4.5)
+  char nameBuf[64];
+  bool pendStrict;        // E8: refuse the whole edit if an effect does not fit
   int portaNote;          // start row of the note whose portamento anchor is being dragged
   int portaNewSpeed;
 
@@ -143,6 +153,8 @@ struct FurnacePianoRoll {
     repeatMode(PR_REPEAT_ASK), repeatPopup(false), repeatPopupCount(0),
     previewNote(-999), statusTime(-100.0), prefsLoaded(false) {
     portaNote=-1; portaNewSpeed=0;
+    snap=PR_SNAP_ROW; pendStrict=false;
+    nameEditPitch=-1; nameBuf[0]=0;
     seenOrd=-1; seenRow=-1; seenChan=-1; revealRow=-1;
     markerRow=-1; loopIn=-1; loopOut=-1; loopApplied=false; loopAppliedIn=-1; loopAppliedOut=-1;
     focusRow=-1; laneFx=-1; lanes=true; focusFxField=false; focusValField=false;
@@ -264,8 +276,14 @@ void FurnaceGUI::pianoRollCommit() {
     if (pr.pendOp) return pr.pendOp(c);
     return prApplyEdit(c,pr.pendRem,pr.pendAdd,endMarker);
   };
-  if (!applyPending(dry)) {
-    pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendOp=nullptr;
+  bool dryChanged=applyPending(dry);
+  if (pr.pendStrict && !pr.pendRefused.empty()) {
+    prSetStatus(pr,fmt::sprintf(_("no free effect column for EDxx/ECxx on %d row(s): nothing was changed (add effect columns to this channel, or use Row snap)"),(int)pr.pendRefused.size()));
+    pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendOp=nullptr; pr.pendStrict=false;
+    return;
+  }
+  if (!dryChanged) {
+    pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendOp=nullptr; pr.pendStrict=false;
     return;
   }
   std::set<int> touched;
@@ -320,7 +338,7 @@ void FurnaceGUI::pianoRollCommit() {
       }
       if (found<0) {
         prSetStatus(pr,_("no free pattern left in this channel to make it unique; nothing was changed"));
-        pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendOp=nullptr;
+        pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendOp=nullptr; pr.pendStrict=false;
         return;
       }
       used[found]=true;
@@ -365,7 +383,7 @@ void FurnaceGUI::pianoRollCommit() {
 
   pr.sel.clear();
   for (int s: pr.pendSelect) pr.sel.insert(s);
-  pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendOp=nullptr;
+  pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendOp=nullptr; pr.pendStrict=false;
 }
 
 // E5: called by the instrument list when an instrument is clicked.
@@ -541,6 +559,16 @@ void FurnaceGUI::drawPianoRoll() {
       ImGui::SameLine();
     }
   }
+  {
+    const char* snapNames[3]={_("Snap: row"),_("Snap: 1/2"),_("Snap: tick")};
+    ImGui::SetNextItemWidth(ImGui::CalcTextSize(snapNames[2]).x+ImGui::GetFrameHeight()+10.0f*dpiScale);
+    if (ImGui::BeginCombo("##PRSnap",snapNames[CLAMP(pr.snap,0,2)])) {
+      for (int i=0; i<3; i++) if (ImGui::Selectable(snapNames[i],pr.snap==i)) pr.snap=i;
+      ImGui::EndCombo();
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s",_("where note starts and ends can fall:\nrow: on rows (no effects written)\n1/2 and tick: inside a row, written as EDxx (start delay) and ECxx (cut)"));
+  }
+  ImGui::SameLine();
   ImGui::Dummy(ImVec2(6.0f*dpiScale,1));
   ImGui::SameLine();
   if (ImGui::Button(cp.endRel?_("End: REL##PREnd"):_("End: OFF##PREnd"))) {
@@ -1388,7 +1416,7 @@ void FurnaceGUI::drawPianoRoll() {
         const PRNote& n=notes[i];
         int a=axisIndex[n.pitch];
         if (a!=mAx) continue;
-        float x0=org.x+n.start*zX, x1=org.x+n.end*zX;
+        float x0=org.x+noteX0(n), x1=org.x+MAX(noteX0(n)+2.0f,noteX1(n));
         if (io.MousePos.x>=x0 && io.MousePos.x<x1) {
           hitIdx=(int)i;
           // resize zone: at most a quarter of the note, so short notes can still be moved
@@ -1538,13 +1566,123 @@ void FurnaceGUI::drawPianoRoll() {
       if (io.MousePos.x<viewMin.x+8.0f*dpiScale) ImGui::SetScrollX(pr.scrollX-zX);
     }
 
+    // E8: absolute tick at the start of each row, and snapping inside a row
+    std::vector<long long> tickStart(totalRows+1,0);
+    for (int r=0; r<totalRows; r++) tickStart[r+1]=tickStart[r]+(long long)ticksPerRow(r);
+    long long totalTicks=tickStart[totalRows];
+    auto snapTick=[&](float cx) -> long long {
+      int r=CLAMP((int)floorf(cx/zX),0,MAX(0,totalRows-1));
+      float frac=CLAMP((cx-r*zX)/zX,0.0f,1.0f);
+      int tpr=(int)ticksPerRow(r);
+      int t=0;
+      if (pr.snap==PR_SNAP_TICK) {
+        t=(int)roundf(frac*tpr);
+      } else {
+        int half=tpr/2;
+        float ft=frac*tpr;
+        t=0;
+        if (half>0 && fabsf(ft-half)<ft && fabsf(ft-half)<=fabsf(tpr-ft)) t=half;
+        else if (fabsf(tpr-ft)<ft) t=tpr;
+      }
+      return CLAMP(tickStart[r]+t,0LL,totalTicks);
+    };
+    auto tickToRT=[&](long long T, int& row, int& t) {
+      int lo=0, hi=totalRows; // largest r with tickStart[r]<=T
+      while (lo<hi) {
+        int mid=(lo+hi+1)/2;
+        if (tickStart[mid]<=T) lo=mid; else hi=mid-1;
+      }
+      row=lo;
+      t=(int)(T-tickStart[lo]);
+    };
+    auto noteStartTick=[&](const PRNote& n) -> long long { return tickStart[n.start]+n.delayTicks; };
+    auto noteEndTick=[&](const PRNote& n) -> long long {
+      if (n.cutRow>=0 && n.cutRow<n.end) return tickStart[n.cutRow]+n.cutTicks;
+      return tickStart[MIN(n.end,totalRows)];
+    };
+
     // build the edit a drag would make (also used to draw the preview)
     std::vector<int> dRem;
     std::vector<PRNoteSpec> dAdd;
     std::vector<int> dSel;
     std::vector<int> dFrom; // E6b: existing note each dAdd comes from (move, duplicate, resize)
+    std::vector<int> dDelay, dCut; // E8: sub-row start/end of each dAdd (tick and 1/2 snap)
+    bool dTick=false;
     auto buildDragEdit=[&]() {
-      dRem.clear(); dAdd.clear(); dSel.clear(); dFrom.clear();
+      dRem.clear(); dAdd.clear(); dSel.clear(); dFrom.clear(); dDelay.clear(); dCut.clear();
+      dTick=(pr.snap!=PR_SNAP_ROW) && (pr.drag==PR_DRAG_MOVE || pr.drag==PR_DRAG_DUPLICATE || pr.drag==PR_DRAG_RESIZE || pr.drag==PR_DRAG_CREATE);
+      if (dTick) {
+        long long tDown=snapTick(pr.dragMouseRow0*zX);
+        long long tCur=snapTick(mRowF*zX);
+        struct Ed { int from; long long S, E; int pitch, ins; };
+        std::vector<Ed> eds;
+        if (pr.drag==PR_DRAG_CREATE) {
+          long long S=tDown, E=tCur;
+          if (E<=S) {
+            int rS, tS;
+            tickToRT(S,rS,tS);
+            E=MIN(totalTicks,tickStart[MIN(totalRows,rS+MAX(1,pr.lastLen))]+tS);
+          }
+          if (E<=S) return;
+          eds.push_back({-1,S,E,pr.createPitch,curIns});
+        } else {
+          long long d=tCur-tDown;
+          int dp=pr.dragDPitch;
+          long long minS=totalTicks, maxE=0;
+          for (PRNote& n: notes) {
+            if (!pr.sel.count(n.start)) continue;
+            minS=MIN(minS,noteStartTick(n));
+            maxE=MAX(maxE,noteEndTick(n));
+            if (pr.drag!=PR_DRAG_RESIZE) {
+              if (n.pitch+dp<0) dp=-n.pitch;
+              if (n.pitch+dp>179) dp=179-n.pitch;
+            }
+          }
+          if (minS>=maxE) return;
+          if (pr.drag==PR_DRAG_RESIZE) {
+            if (d==0) return;
+          } else {
+            if (pr.drag==PR_DRAG_DUPLICATE) {
+              long long span=maxE-minS;
+              if (d>-span && d<span) d=(d<0)?-span:span;
+            }
+            if (minS+d<0) d=-minS;
+            if (maxE+d>totalTicks) d=totalTicks-maxE;
+            if (d==0 && dp==0) return;
+            if (pr.drag==PR_DRAG_DUPLICATE && d==0) return;
+          }
+          for (PRNote& n: notes) {
+            if (!pr.sel.count(n.start)) continue;
+            long long S=noteStartTick(n), E=noteEndTick(n);
+            if (pr.drag==PR_DRAG_RESIZE) {
+              E=MAX(S+1,E+d);
+              eds.push_back({n.start,S,MIN(E,totalTicks),n.pitch,n.ins});
+            } else {
+              eds.push_back({n.start,S+d,E+d,n.pitch+dp,n.ins});
+            }
+          }
+        }
+        for (Ed& x: eds) {
+          int rS, tS, rE, uE;
+          tickToRT(x.S,rS,tS);
+          tickToRT(x.E,rE,uE);
+          if (rS>=totalRows) continue;
+          int endRow=(uE>0)?(rE+1):rE;
+          if (endRow<=rS) endRow=rS+1;
+          if (endRow>totalRows) { endRow=totalRows; uE=0; }
+          if (x.from>=0 && pr.drag!=PR_DRAG_DUPLICATE) dRem.push_back(x.from);
+          dFrom.push_back(x.from);
+          dAdd.push_back(PRNoteSpec(rS,endRow,x.pitch,x.ins));
+          dDelay.push_back(tS);
+          dCut.push_back(uE);
+          dSel.push_back(rS);
+        }
+        std::vector<int> ends;
+        for (PRNoteSpec& a: dAdd) ends.push_back(a.end);
+        prClipAdds(notes,dRem,dAdd);
+        for (size_t i=0; i<dAdd.size(); i++) if (dAdd[i].end!=ends[i]) dCut[i]=0; // cut short by the next note
+        return;
+      }
       if (pr.drag==PR_DRAG_MOVE || pr.drag==PR_DRAG_DUPLICATE || pr.drag==PR_DRAG_RESIZE) {
         // clamp the deltas so no selected note leaves the song or the pitch range
         int dr=pr.dragDRow, dp=pr.dragDPitch, dl=pr.dragDLen;
@@ -1644,7 +1782,21 @@ void FurnaceGUI::drawPianoRoll() {
             } else if (pr.drag==PR_DRAG_RESIZE && dAdd.size()==1) {
               pr.lastLen=dAdd[0].end-dAdd[0].start;
             }
-            if ((pr.drag==PR_DRAG_MOVE || pr.drag==PR_DRAG_DUPLICATE || pr.drag==PR_DRAG_RESIZE) && dFrom.size()==dAdd.size()) {
+            if (dTick && dFrom.size()==dAdd.size()) {
+              // E8: sub-row positions, written as EDxx/ECxx; refused as a whole if they do not fit
+              std::vector<PRMove> moves;
+              bool copy=(pr.drag==PR_DRAG_DUPLICATE);
+              for (size_t i=0; i<dAdd.size(); i++) {
+                int dl2=(pr.drag==PR_DRAG_RESIZE)?-1:dDelay[i];
+                moves.push_back(PRMove(dFrom[i],dAdd[i],copy,dl2,dCut[i]));
+              }
+              int endMk2=cp.endRel?PR_PITCH_REL:PR_PITCH_OFF;
+              FurnacePianoRoll* prp2=&pr;
+              pr.pendRem.clear();
+              pr.pendAdd.clear();
+              pr.pendStrict=true;
+              pr.pendOp=[moves,endMk2,prp2](PREditCtx& c) -> bool { return prMoveNotes(c,moves,endMk2,&prp2->pendRefused); };
+            } else if ((pr.drag==PR_DRAG_MOVE || pr.drag==PR_DRAG_DUPLICATE || pr.drag==PR_DRAG_RESIZE) && dFrom.size()==dAdd.size()) {
               // E6b: notes take their effects along
               std::vector<PRMove> moves;
               bool copy=(pr.drag==PR_DRAG_DUPLICATE);
@@ -1784,7 +1936,9 @@ void FurnaceGUI::drawPianoRoll() {
         short nn,oo;
         prEncodePitch(n.pitch,nn,oo);
         dl->PushClipRect(p0,p1,true);
-        dl->AddText(ImVec2(x0+3.0f*dpiScale,y0+(zY-ImGui::GetFontSize())*0.5f),colNoteText,noteName(nn,oo));
+        auto nmIt2=cp.rowNames.find(n.pitch);
+        const char* lbl=(nmIt2!=cp.rowNames.end() && !nmIt2->second.empty())?nmIt2->second.c_str():noteName(nn,oo);
+        dl->AddText(ImVec2(x0+3.0f*dpiScale,y0+(zY-ImGui::GetFontSize())*0.5f),colNoteText,lbl);
         dl->PopClipRect();
       }
       if (pr.drag==PR_DRAG_NONE && gridHovered && ImGui::IsMouseHoveringRect(p0,p1)) {
@@ -1897,12 +2051,18 @@ void FurnaceGUI::drawPianoRoll() {
     // drag preview (where the notes will go)
     if (!dAdd.empty() && pr.drag!=PR_DRAG_NONE) {
       ImU32 colPrev=ImGui::GetColorU32(ImVec4(cc.x*0.5f+0.5f,cc.y*0.5f+0.5f,cc.z*0.5f+0.5f,0.85f));
-      for (const PRNoteSpec& s: dAdd) {
+      for (size_t di=0; di<dAdd.size(); di++) {
+        const PRNoteSpec& s=dAdd[di];
         int a=axisIndex[CLAMP(s.pitch,0,179)];
         if (a<0) continue;
         float y0=org.y+a*zY;
-        ImVec2 p0=ImVec2(org.x+s.start*zX+1,y0+1);
-        ImVec2 p1=ImVec2(org.x+s.end*zX-1,y0+zY-1);
+        float px0=s.start*zX, px1=s.end*zX;
+        if (dTick && di<dDelay.size()) {
+          if (dDelay[di]>0) px0=tickToX(s.start,(float)dDelay[di]);
+          if (dCut[di]>0) px1=tickToX(s.end-1,(float)dCut[di]);
+        }
+        ImVec2 p0=ImVec2(org.x+px0+1,y0+1);
+        ImVec2 p1=ImVec2(org.x+MAX(px0+3.0f,px1)-1,y0+zY-1);
         dl->AddRectFilled(p0,p1,colPrev,2.0f*dpiScale);
         dl->AddRect(p0,p1,colSelBorder,2.0f*dpiScale,0,2.0f*dpiScale);
         short nn,oo;
@@ -2083,6 +2243,16 @@ void FurnaceGUI::drawPianoRoll() {
       }
       int pc=p%12;
       if (cp.fold || pc==0 || pc==5) dl->AddLine(ImVec2(k0.x,y0+zYl),ImVec2(k1.x,y0+zYl),colSep);
+      // E8 (4.5): a named row shows its name instead of the note
+      auto nmIt=cp.rowNames.find(p);
+      if (nmIt!=cp.rowNames.end() && !nmIt->second.empty() && zYl>=ImGui::GetFontSize()*0.7f) {
+        ImU32 tc=(black && !gap)?ImGui::GetColorU32(ImVec4(1,1,1,0.95f)):ImGui::GetColorU32(ImVec4(0,0,0,0.95f));
+        if (black && !gap) dl->AddRectFilled(ImVec2(k0.x,y0),ImVec2(k1.x,y0+zYl),colBlack);
+        dl->PushClipRect(ImVec2(k0.x,y0),ImVec2(k1.x,y0+zYl),true);
+        dl->AddText(ImVec2(k0.x+3.0f*dpiScale,y0+(zYl-ImGui::GetFontSize())*0.5f),tc,nmIt->second.c_str());
+        dl->PopClipRect();
+        continue;
+      }
       bool label=(pc==0) || cp.fold;
       if (label && zYl>=ImGui::GetFontSize()*0.7f) {
         short nn,oo;
@@ -2095,6 +2265,52 @@ void FurnaceGUI::drawPianoRoll() {
       }
     }
     dl->PopClipRect();
+
+    // E8 (4.5): right-click a key to name that row (sample, drum, noise mode...)
+    ImGui::SetCursorScreenPos(k0);
+    ImGui::InvisibleButton("##PRKeys",ImVec2(MAX(1.0f,k1.x-k0.x),MAX(1.0f,k1.y-k0.y)),ImGuiButtonFlags_MouseButtonRight);
+    if (ImGui::IsItemHovered()) {
+      int a=(int)floorf((ImGui::GetIO().MousePos.y-k0.y+pr.scrollY)/zYl);
+      if (a>=0 && a<(int)axis.size()) {
+        int p=axis[a];
+        if (p<0) p=-1-p;
+        short nn,oo;
+        prEncodePitch(p,nn,oo);
+        auto it=cp.rowNames.find(p);
+        if (it!=cp.rowNames.end()) {
+          ImGui::SetTooltip(_("%s: %s\nright-click: rename this row"),noteName(nn,oo),it->second.c_str());
+        } else {
+          ImGui::SetTooltip(_("%s\nright-click: give this row a name (e.g. kick, snare)"),noteName(nn,oo));
+        }
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+          pr.nameEditPitch=p;
+          snprintf(pr.nameBuf,63,"%s",(it!=cp.rowNames.end())?it->second.c_str():"");
+          ImGui::OpenPopup("PRRowName");
+        }
+      }
+    }
+    if (ImGui::BeginPopup("PRRowName")) {
+      short nn,oo;
+      prEncodePitch(CLAMP(pr.nameEditPitch,0,179),nn,oo);
+      ImGui::Text(_("Name for row %s (this channel)"),noteName(nn,oo));
+      if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+      ImGui::SetNextItemWidth(220.0f*dpiScale);
+      bool enter=ImGui::InputText("##PRRowNameIn",pr.nameBuf,63,ImGuiInputTextFlags_EnterReturnsTrue);
+      ImGui::SameLine();
+      bool ok=ImGui::Button(_("OK##PRRowNameOK"));
+      ImGui::SameLine();
+      bool clear=ImGui::Button(_("Remove##PRRowNameDel"));
+      if (enter || ok || clear) {
+        if (clear || pr.nameBuf[0]==0) {
+          cp.rowNames.erase(pr.nameEditPitch);
+        } else {
+          cp.rowNames[pr.nameEditPitch]=pr.nameBuf;
+        }
+        prSavePrefs(pr,curFileName);
+        ImGui::CloseCurrentPopup();
+      }
+      ImGui::EndPopup();
+    }
   }
 
   // ---------------- lanes: volume (3.6) and effect (3.7) ----------------
@@ -2459,7 +2675,7 @@ void FurnaceGUI::drawPianoRoll() {
     }
     ImGui::SameLine();
     if (ImGui::Button(_("Cancel"))) {
-      pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendOp=nullptr;
+      pr.pendRem.clear(); pr.pendAdd.clear(); pr.pendSelect.clear(); pr.pendOp=nullptr; pr.pendStrict=false;
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();

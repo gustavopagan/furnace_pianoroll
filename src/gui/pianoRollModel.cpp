@@ -448,13 +448,24 @@ bool prMoveNotes(PREditCtx& ctx, const std::vector<PRMove>& moves, int endMarker
     int vol;
     std::vector<std::pair<int,int>> fx; // carried start-row effects
     int cutRow, cutVal;                 // carried note cut (-1: none)
-    Job(const PRMove& mv): m(mv), oldEnd(0), sameStart(false), vol(-1), cutRow(-1), cutVal(0) {}
+    int oldCutRow;                      // the note's cut before the edit (-1: none)
+    bool isNew;
+    Job(const PRMove& mv): m(mv), oldEnd(0), sameStart(false), vol(-1), cutRow(-1), cutVal(0), oldCutRow(-1), isNew(false) {}
   };
   std::vector<Job> jobs;
   for (const PRMove& mv: moves) {
+    if (mv.from<0) {
+      // a new note (E8 create with tick snap): nothing to carry
+      Job j(mv);
+      j.isNew=true;
+      j.m.copy=true;
+      jobs.push_back(j);
+      continue;
+    }
     const PRNote* n=prFindStart(before,mv.from);
     if (n==NULL) continue;
     Job j(mv);
+    j.oldCutRow=n->cutRow;
     j.oldEnd=n->end;
     j.sameStart=(mv.to.start==mv.from);
     const short* row=ctx.get(mv.from);
@@ -475,6 +486,17 @@ bool prMoveNotes(PREditCtx& ctx, const std::vector<PRMove>& moves, int endMarker
       j.cutRow=n->cutRow;
       j.cutVal=n->cutTicks;
     }
+    // E8: given delay/cut replace the note's own EDxx/ECxx, so those do not travel
+    if (mv.delay>=0 || mv.cut>=0) {
+      std::vector<std::pair<int,int>> keep;
+      for (auto& x: j.fx) {
+        if (mv.delay>=0 && x.first==0xed) continue;
+        if (mv.cut>=0 && x.first==0xec) continue;
+        keep.push_back(x);
+      }
+      j.fx=keep;
+      if (mv.cut>=0) j.cutRow=-1;
+    }
     jobs.push_back(j);
   }
 
@@ -482,6 +504,13 @@ bool prMoveNotes(PREditCtx& ctx, const std::vector<PRMove>& moves, int endMarker
   // 1. lift what travels from the old rows (moves only, not copies)
   for (Job& j: jobs) {
     if (j.m.copy) continue;
+    // E8: the note's own EDxx/ECxx are replaced, so they go away from the old place
+    if (j.m.delay>=0) {
+      if (prRemoveEffect(ctx,{j.m.from},0xed)) changed=true;
+    }
+    if (j.m.cut>=0 && j.oldCutRow>=0) {
+      if (prRemoveEffect(ctx,{j.oldCutRow},0xec)) changed=true;
+    }
     if (!j.sameStart) {
       if (j.vol>=0) {
         ctx.getMut(j.m.from)[PR_COL_VOL]=-1;
@@ -500,7 +529,7 @@ bool prMoveNotes(PREditCtx& ctx, const std::vector<PRMove>& moves, int endMarker
   std::vector<int> rem;
   std::vector<PRNoteSpec> add;
   for (Job& j: jobs) {
-    if (!j.m.copy) rem.push_back(j.m.from);
+    if (!j.m.copy && !j.isNew) rem.push_back(j.m.from);
     add.push_back(j.m.to);
   }
   if (prApplyEdit(ctx,rem,add,endMarker)) changed=true;
@@ -538,6 +567,24 @@ bool prMoveNotes(PREditCtx& ctx, const std::vector<PRMove>& moves, int endMarker
           if (!j.m.copy) prSetEffect(ctx,{j.cutRow},0xec,j.cutVal,&ref2);
           if (refused!=NULL) refused->push_back(nc);
         }
+      }
+    }
+    // E8: sub-row start and end
+    if (j.m.delay>=0) {
+      if (j.m.delay>0) {
+        std::vector<int> ref;
+        if (prSetEffect(ctx,{to},0xed,j.m.delay,&ref)) changed=true;
+        if (!ref.empty() && refused!=NULL) refused->push_back(to);
+      } else if (prRemoveEffect(ctx,{to},0xed)) {
+        changed=true;
+      }
+    }
+    if (j.m.cut>0) {
+      int last=MIN_PR(j.m.to.end,ctx.total)-1;
+      if (last>=to) {
+        std::vector<int> ref;
+        if (prSetEffect(ctx,{last},0xec,j.m.cut,&ref)) changed=true;
+        if (!ref.empty() && refused!=NULL) refused->push_back(last);
       }
     }
   }

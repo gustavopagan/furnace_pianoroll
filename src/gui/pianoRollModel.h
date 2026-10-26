@@ -169,10 +169,15 @@ bool prIsSongEffect(int fx);
 // from: start row of the existing note. to: where it goes (already clipped by the caller).
 // copy: duplicate (the original and its effects stay).
 struct PRMove {
-  int from;
+  int from;       // start row of the existing note; -1: a new note
   PRNoteSpec to;
   bool copy;
-  PRMove(int f, PRNoteSpec t, bool c): from(f), to(t), copy(c) {}
+  // E8 sub-row (tick snap). -1: keep whatever the note had (moves carry it).
+  // delay >= 0: the note starts `delay` ticks into its first row (EDxx; 0 = no EDxx).
+  // cut >= 0: the note is cut `cut` ticks into its last row, to.end-1 (ECxx; 0 = no ECxx).
+  int delay, cut;
+  PRMove(int f, PRNoteSpec t, bool c): from(f), to(t), copy(c), delay(-1), cut(-1) {}
+  PRMove(int f, PRNoteSpec t, bool c, int d, int ct): from(f), to(t), copy(c), delay(d), cut(ct) {}
 };
 
 // like prApplyEdit for moves, plus:
@@ -180,6 +185,8 @@ struct PRMove {
 //   start-row volume go with it; a note cut (ECxx) later inside the note keeps its distance
 //   from the end of the note.
 // - when only the length changes (resize), the note cut keeps its distance from the end.
+// E8: with delay/cut set, the note's EDxx/ECxx are replaced by the given ones; a value that does
+// not fit (no free effect column) goes to *refused (the caller refuses the whole edit).
 // at the destination, effects already there stay; carried ones take free columns (same effect:
 // the carried value wins). what does not fit stays where it was and its row goes to *refused.
 bool prMoveNotes(PREditCtx& ctx, const std::vector<PRMove>& moves, int endMarker, std::vector<int>* refused);
