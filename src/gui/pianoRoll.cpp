@@ -348,7 +348,7 @@ void FurnaceGUI::pianoRollCommit() {
     prSetStatus(pr,fmt::sprintf(_("made %d pattern(s) unique"),(int)uniq.size()));
   }
   if (!pr.pendRefused.empty()) {
-    prSetStatus(pr,fmt::sprintf(_("%d row(s) had no free effect column and were left alone (add effect columns to this channel in the pattern view)"),(int)pr.pendRefused.size()));
+    prSetStatus(pr,fmt::sprintf(_("%d effect(s) did not fit (no free effect column) and stayed where they were; add effect columns to this channel in the pattern view"),(int)pr.pendRefused.size()));
   }
 
   pr.sel.clear();
@@ -617,6 +617,7 @@ void FurnaceGUI::drawPianoRoll() {
       if (ImGui::IsKeyPressed(ImGuiKey_Escape,false)) pr.sel.clear();
       if ((ImGui::IsKeyPressed(ImGuiKey_Delete,false) || ImGui::IsKeyPressed(ImGuiKey_Backspace,false)) && !pr.sel.empty()) {
         pr.pendRem.assign(pr.sel.begin(),pr.sel.end());
+        pr.pendOp=nullptr;
         pr.pendAdd.clear();
         pr.pendSelect.clear();
         pianoRollCommit();
@@ -653,12 +654,16 @@ void FurnaceGUI::drawPianoRoll() {
     pr.pendOp=op;
     pianoRollCommit();
   };
+  int endMk=cp.endRel?PR_PITCH_REL:PR_PITCH_OFF;
+  // rem[i] becomes add[i]: the note keeps its effects (prMoveNotes)
   auto queueNotes=[&](std::vector<int> rem, std::vector<PRNoteSpec> add, std::vector<int> selAfter) {
     prClipAdds(notes,rem,add);
-    pr.pendOp=nullptr;
-    pr.pendRem=rem;
-    pr.pendAdd=add;
+    std::vector<PRMove> moves;
+    for (size_t i=0; i<rem.size() && i<add.size(); i++) moves.push_back(PRMove(rem[i],add[i],false));
+    pr.pendRem.clear();
+    pr.pendAdd.clear();
     pr.pendSelect=selAfter;
+    pr.pendOp=[moves,endMk,prp](PREditCtx& c) -> bool { return prMoveNotes(c,moves,endMk,&prp->pendRefused); };
     pianoRollCommit();
   };
   auto fxDesc=[&](int fx) -> const char* {
@@ -1221,8 +1226,9 @@ void FurnaceGUI::drawPianoRoll() {
     std::vector<int> dRem;
     std::vector<PRNoteSpec> dAdd;
     std::vector<int> dSel;
+    std::vector<int> dFrom; // E6b: existing note each dAdd comes from (move, duplicate, resize)
     auto buildDragEdit=[&]() {
-      dRem.clear(); dAdd.clear(); dSel.clear();
+      dRem.clear(); dAdd.clear(); dSel.clear(); dFrom.clear();
       if (pr.drag==PR_DRAG_MOVE || pr.drag==PR_DRAG_DUPLICATE || pr.drag==PR_DRAG_RESIZE) {
         // clamp the deltas so no selected note leaves the song or the pitch range
         int dr=pr.dragDRow, dp=pr.dragDPitch, dl=pr.dragDLen;
@@ -1260,6 +1266,7 @@ void FurnaceGUI::drawPianoRoll() {
         for (PRNote& n: notes) {
           if (!pr.sel.count(n.start)) continue;
           if (pr.drag!=PR_DRAG_DUPLICATE) dRem.push_back(n.start);
+          dFrom.push_back(n.start);
           if (pr.drag==PR_DRAG_RESIZE) {
             dAdd.push_back(PRNoteSpec(n.start,n.end+dl,n.pitch,n.ins));
             dSel.push_back(n.start);
@@ -1296,6 +1303,7 @@ void FurnaceGUI::drawPianoRoll() {
         case PR_DRAG_ERASE:
           if (!pr.eraseSet.empty()) {
             pr.pendRem.assign(pr.eraseSet.begin(),pr.eraseSet.end());
+            pr.pendOp=nullptr;
             pr.pendAdd.clear();
             pr.pendSelect.clear();
             pianoRollCommit();
@@ -1308,8 +1316,21 @@ void FurnaceGUI::drawPianoRoll() {
             } else if (pr.drag==PR_DRAG_RESIZE && dAdd.size()==1) {
               pr.lastLen=dAdd[0].end-dAdd[0].start;
             }
-            pr.pendRem=dRem;
-            pr.pendAdd=dAdd;
+            if ((pr.drag==PR_DRAG_MOVE || pr.drag==PR_DRAG_DUPLICATE || pr.drag==PR_DRAG_RESIZE) && dFrom.size()==dAdd.size()) {
+              // E6b: notes take their effects along
+              std::vector<PRMove> moves;
+              bool copy=(pr.drag==PR_DRAG_DUPLICATE);
+              for (size_t i=0; i<dAdd.size(); i++) moves.push_back(PRMove(dFrom[i],dAdd[i],copy));
+              int endMk2=cp.endRel?PR_PITCH_REL:PR_PITCH_OFF;
+              FurnacePianoRoll* prp2=&pr;
+              pr.pendRem.clear();
+              pr.pendAdd.clear();
+              pr.pendOp=[moves,endMk2,prp2](PREditCtx& c) -> bool { return prMoveNotes(c,moves,endMk2,&prp2->pendRefused); };
+            } else {
+              pr.pendRem=dRem;
+              pr.pendAdd=dAdd;
+              pr.pendOp=nullptr;
+            }
             pr.pendSelect=dSel;
             pianoRollCommit();
           }

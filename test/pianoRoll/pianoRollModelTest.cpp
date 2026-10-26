@@ -684,6 +684,86 @@ int main() {
     CHECK(!prSetVolume(x,{{2,-1}}));
   }
   {
+    TEST("E6b mover: efeitos e volume da linha inicial vão junto; efeito de música fica");
+    FakeChan c(32,{0},3);
+    c.note(0,4,C4,1); c.row(0,4)[PR_COL_VOL]=0x50; c.fx(0,4,0,0x03,0x10); c.fx(0,4,1,0x0f,0x06);
+    c.note(0,8,PR_PITCH_OFF);
+    PREditCtx x=c.ctx();
+    std::vector<int> ref;
+    CHECK(prMoveNotes(x,{PRMove(4,PRNoteSpec(12,16,C4+2,1),false)},PR_PITCH_OFF,&ref));
+    CHECK(ref.empty());
+    // linha antiga: sem nota, sem 03, sem volume; 0F continua
+    CHECK(c.row(0,4)[PR_COL_VOL]==-1);
+    CHECK(c.row(0,4)[PR_COL_FX(0)]==-1);
+    CHECK(c.row(0,4)[PR_COL_FX(1)]==0x0f && c.row(0,4)[PR_COL_FXVAL(1)]==0x06);
+    // linha nova
+    CHECK(c.row(0,12)[PR_COL_VOL]==0x50);
+    auto e12=prRowEffects(c.row(0,12),3);
+    CHECK(e12.size()==1 && e12[0].fx==0x03 && e12[0].val==0x10);
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==1 && n[0].start==12 && n[0].end==16 && n[0].pitch==C4+2);
+  }
+  {
+    TEST("E6b duplicar: original e cópia ficam com os efeitos");
+    FakeChan c(32,{0},2);
+    c.note(0,0,C4,1); c.fx(0,0,0,0x03,0x20); c.note(0,4,PR_PITCH_OFF);
+    PREditCtx x=c.ctx();
+    CHECK(prMoveNotes(x,{PRMove(0,PRNoteSpec(8,12,C4,1),true)},PR_PITCH_OFF,NULL));
+    CHECK(c.row(0,0)[PR_COL_FX(0)]==0x03);
+    CHECK(c.row(0,8)[PR_COL_FX(0)]==0x03 && c.row(0,8)[PR_COL_FXVAL(0)]==0x20);
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==2);
+  }
+  {
+    TEST("E6b destino sem coluna livre: o efeito fica na linha antiga e a linha é avisada");
+    FakeChan c(32,{0},1);
+    c.note(0,0,C4,1); c.fx(0,0,0,0x03,0x20); c.note(0,4,PR_PITCH_OFF);
+    c.fx(0,10,0,0x08,0x11);
+    PREditCtx x=c.ctx();
+    std::vector<int> ref;
+    CHECK(prMoveNotes(x,{PRMove(0,PRNoteSpec(10,14,C4,1),false)},PR_PITCH_OFF,&ref));
+    CHECK(ref.size()==1 && ref[0]==10);
+    CHECK(c.row(0,0)[PR_COL_FX(0)]==0x03 && c.row(0,0)[PR_COL_FXVAL(0)]==0x20);
+    CHECK(c.row(0,10)[PR_COL_FX(0)]==0x08);
+    // mesmo efeito no destino: o valor da nota vence
+    FakeChan d(32,{0},1);
+    d.note(0,0,C4,1); d.fx(0,0,0,0x03,0x20); d.note(0,4,PR_PITCH_OFF);
+    d.fx(0,10,0,0x03,0x55);
+    PREditCtx y=d.ctx();
+    std::vector<int> ref2;
+    CHECK(prMoveNotes(y,{PRMove(0,PRNoteSpec(10,14,C4,1),false)},PR_PITCH_OFF,&ref2));
+    CHECK(ref2.empty() && d.row(0,10)[PR_COL_FXVAL(0)]==0x20);
+  }
+  {
+    TEST("E6b corte EC dentro da nota: anda junto e mantém a distância do fim");
+    FakeChan c(32,{0},2);
+    c.note(0,0,C4,1); c.fx(0,2,0,0xec,3); c.note(0,4,PR_PITCH_OFF); // nota 0..4, corte na linha 2
+    PREditCtx x=c.ctx();
+    CHECK(prMoveNotes(x,{PRMove(0,PRNoteSpec(10,14,C4,1),false)},PR_PITCH_OFF,NULL));
+    CHECK(c.row(0,2)[PR_COL_FX(0)]==-1);
+    CHECK(c.row(0,12)[PR_COL_FX(0)]==0xec && c.row(0,12)[PR_COL_FXVAL(0)]==3);
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==1 && n[0].cutRow==12 && n[0].cutTicks==3);
+    // redimensionar: o corte acompanha o fim
+    PREditCtx y=c.ctx();
+    CHECK(prMoveNotes(y,{PRMove(10,PRNoteSpec(10,20,C4,1),false)},PR_PITCH_OFF,NULL));
+    auto m=prReadChannel(c.src());
+    CHECK(m.size()==1 && m[0].end==20 && m[0].cutRow==18);
+    CHECK(c.row(0,12)[PR_COL_FX(0)]==-1);
+  }
+  {
+    TEST("E6b mover várias notas trocando de lugar não perde efeitos");
+    FakeChan c(32,{0},1);
+    c.note(0,0,C4,1); c.fx(0,0,0,0x03,0x11);
+    c.note(0,4,C4+1,1); c.fx(0,4,0,0x03,0x22);
+    c.note(0,8,PR_PITCH_OFF);
+    PREditCtx x=c.ctx();
+    CHECK(prMoveNotes(x,{PRMove(0,PRNoteSpec(4,8,C4,1),false),PRMove(4,PRNoteSpec(8,12,C4+1,1),false)},PR_PITCH_OFF,NULL));
+    CHECK(c.row(0,0)[PR_COL_FX(0)]==-1);
+    CHECK(c.row(0,4)[PR_COL_FXVAL(0)]==0x11);
+    CHECK(c.row(0,8)[PR_COL_FXVAL(0)]==0x22);
+  }
+  {
     TEST("prefs: ida e volta em JSON (OFF/REL, fold, nomes com acento e aspas)");
     PRPrefs a;
     a.get(0).endRel=true;

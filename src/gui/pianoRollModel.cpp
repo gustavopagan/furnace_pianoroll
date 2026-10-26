@@ -422,3 +422,124 @@ bool prSetVolume(PREditCtx& ctx, const std::vector<std::pair<int,int>>& rowVal) 
   }
   return changed;
 }
+
+// ---------------- E6 (revised): moving notes with their effects ----------------
+
+bool prIsSongEffect(int fx) {
+  if (fx>=0xc0 && fx<=0xcf) return true; // Cxxx tick rate
+  switch (fx) {
+    case 0x09: case 0x0f: // speed
+    case 0xf0: case 0xfd: case 0xfe: // tempo
+    case 0x0b: case 0x0d: // jumps
+    case 0xff: // stop
+      return true;
+  }
+  return false;
+}
+
+bool prMoveNotes(PREditCtx& ctx, const std::vector<PRMove>& moves, int endMarker, std::vector<int>* refused) {
+  std::vector<PRNote> before=prReadRows(ctx.total,ctx.effectCols,ctx.get);
+  int cols=prClampCols(ctx.effectCols);
+
+  struct Job {
+    PRMove m;
+    int oldEnd;
+    bool sameStart;
+    int vol;
+    std::vector<std::pair<int,int>> fx; // carried start-row effects
+    int cutRow, cutVal;                 // carried note cut (-1: none)
+    Job(const PRMove& mv): m(mv), oldEnd(0), sameStart(false), vol(-1), cutRow(-1), cutVal(0) {}
+  };
+  std::vector<Job> jobs;
+  for (const PRMove& mv: moves) {
+    const PRNote* n=prFindStart(before,mv.from);
+    if (n==NULL) continue;
+    Job j(mv);
+    j.oldEnd=n->end;
+    j.sameStart=(mv.to.start==mv.from);
+    const short* row=ctx.get(mv.from);
+    if (!j.sameStart) {
+      j.vol=row[PR_COL_VOL];
+      for (int i=0; i<cols; i++) {
+        int f=row[PR_COL_FX(i)];
+        if (f<0 || prIsSongEffect(f)) continue;
+        bool dup=false;
+        for (auto& x: j.fx) if (x.first==f) dup=true;
+        if (dup) continue;
+        int v=row[PR_COL_FXVAL(i)];
+        j.fx.push_back(std::make_pair(f,(v<0)?0:v));
+      }
+    }
+    // the cut travels on its own only if it is not already part of the start-row effects
+    if (n->cutRow>=0 && (n->cutRow>n->start || j.sameStart)) {
+      j.cutRow=n->cutRow;
+      j.cutVal=n->cutTicks;
+    }
+    jobs.push_back(j);
+  }
+
+  bool changed=false;
+  // 1. lift what travels from the old rows (moves only, not copies)
+  for (Job& j: jobs) {
+    if (j.m.copy) continue;
+    if (!j.sameStart) {
+      if (j.vol>=0) {
+        ctx.getMut(j.m.from)[PR_COL_VOL]=-1;
+        changed=true;
+      }
+      for (auto& x: j.fx) {
+        if (prRemoveEffect(ctx,{j.m.from},x.first)) changed=true;
+      }
+    }
+    if (j.cutRow>=0) {
+      if (prRemoveEffect(ctx,{j.cutRow},0xec)) changed=true;
+    }
+  }
+
+  // 2. the notes themselves
+  std::vector<int> rem;
+  std::vector<PRNoteSpec> add;
+  for (Job& j: jobs) {
+    if (!j.m.copy) rem.push_back(j.m.from);
+    add.push_back(j.m.to);
+  }
+  if (prApplyEdit(ctx,rem,add,endMarker)) changed=true;
+
+  // 3. put down what travels
+  for (Job& j: jobs) {
+    int to=j.m.to.start;
+    if (to<0 || to>=ctx.total) continue;
+    if (!j.sameStart) {
+      if (j.vol>=0 && ctx.get(to)[PR_COL_VOL]!=j.vol) {
+        ctx.getMut(to)[PR_COL_VOL]=j.vol;
+        changed=true;
+      }
+      for (auto& x: j.fx) {
+        std::vector<int> ref;
+        if (prSetEffect(ctx,{to},x.first,x.second,&ref)) changed=true;
+        if (!ref.empty()) {
+          // did not fit: leave it where it was
+          std::vector<int> ref2;
+          if (!j.m.copy) prSetEffect(ctx,{j.m.from},x.first,x.second,&ref2);
+          if (refused!=NULL) refused->push_back(to);
+        }
+      }
+    }
+    if (j.cutRow>=0) {
+      int newEnd=MIN_PR(j.m.to.end,ctx.total);
+      int nc=newEnd-(j.oldEnd-j.cutRow);
+      if (nc<to) nc=to;
+      if (nc>=newEnd) nc=newEnd-1;
+      if (nc>=0 && nc<ctx.total) {
+        std::vector<int> ref;
+        if (prSetEffect(ctx,{nc},0xec,j.cutVal,&ref)) changed=true;
+        if (!ref.empty()) {
+          std::vector<int> ref2;
+          if (!j.m.copy) prSetEffect(ctx,{j.cutRow},0xec,j.cutVal,&ref2);
+          if (refused!=NULL) refused->push_back(nc);
+        }
+      }
+    }
+  }
+  return changed;
+}

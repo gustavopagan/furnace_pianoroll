@@ -159,4 +159,29 @@ bool prRemoveEffect(PREditCtx& ctx, const std::vector<int>& rows, int fx);
 // volume column: rowVal maps absolute row -> value (-1 clears). returns true if anything changed.
 bool prSetVolume(PREditCtx& ctx, const std::vector<std::pair<int,int>>& rowVal);
 
+// ---------------- E6 (revised): notes carry their effects when moved ----------------
+
+// effects that belong to the song, not to a note (speed, tempo, jumps, stop):
+// they never travel with a note.
+bool prIsSongEffect(int fx);
+
+// one note being moved, duplicated or resized.
+// from: start row of the existing note. to: where it goes (already clipped by the caller).
+// copy: duplicate (the original and its effects stay).
+struct PRMove {
+  int from;
+  PRNoteSpec to;
+  bool copy;
+  PRMove(int f, PRNoteSpec t, bool c): from(f), to(t), copy(c) {}
+};
+
+// like prApplyEdit for moves, plus:
+// - when the start row changes, the note's start-row effects (except song effects) and its
+//   start-row volume go with it; a note cut (ECxx) later inside the note keeps its distance
+//   from the end of the note.
+// - when only the length changes (resize), the note cut keeps its distance from the end.
+// at the destination, effects already there stay; carried ones take free columns (same effect:
+// the carried value wins). what does not fit stays where it was and its row goes to *refused.
+bool prMoveNotes(PREditCtx& ctx, const std::vector<PRMove>& moves, int endMarker, std::vector<int>* refused);
+
 #endif
