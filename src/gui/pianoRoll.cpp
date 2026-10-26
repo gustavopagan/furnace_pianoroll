@@ -88,6 +88,8 @@ struct FurnacePianoRoll {
   std::set<int> eraseSet;
   ImVec2 rectA, rectB;    // rubber band in content coordinates
   int lastLen;
+  int seenOrd, seenRow, seenChan; // E7: last tracker cursor seen
+  int revealRow;          // E7: scroll the roll to show this row (-1: none)
   int portaNote;          // start row of the note whose portamento anchor is being dragged
   int portaNewSpeed;
 
@@ -137,6 +139,7 @@ struct FurnacePianoRoll {
     repeatMode(PR_REPEAT_ASK), repeatPopup(false), repeatPopupCount(0),
     previewNote(-999), statusTime(-100.0), prefsLoaded(false) {
     portaNote=-1; portaNewSpeed=0;
+    seenOrd=-1; seenRow=-1; seenChan=-1; revealRow=-1;
     focusRow=-1; laneFx=-1; lanes=true; focusFxField=false; focusValField=false;
     laneDrag=0; laneLastRow=-1; laneLastVal=0;
     addFxCode[0]=0;
@@ -422,6 +425,26 @@ void FurnaceGUI::drawPianoRoll() {
     ImGui::End();
     return;
   }
+  // E7: tracker cursor -> roll. a cursor move made in the tracker (or anywhere else in Furnace)
+  // brings the roll to that channel and row. moves made by the roll itself update seen* first.
+  {
+    int co=curOrder, cr=cursor.y, cc=cursor.xCoarse;
+    if (co!=pr.seenOrd || cr!=pr.seenRow || cc!=pr.seenChan) {
+      bool first=(pr.seenOrd<0);
+      pr.seenOrd=co;
+      pr.seenRow=cr;
+      pr.seenChan=cc;
+      if (!first) {
+        if (cc!=pr.chan && cc>=0 && cc<chanCount) {
+          pr.chan=cc;
+          pr.sel.clear();
+          pr.focusRow=-1;
+          pr.centerPending=true;
+        }
+        if (!e->isPlaying()) pr.revealRow=co*sub->patLen+cr;
+      }
+    }
+  }
   PRChanPrefs& cp=pr.prefs.get(pr.chan);
 
   // ---------------- toolbar ----------------
@@ -520,6 +543,27 @@ void FurnaceGUI::drawPianoRoll() {
   int totalRows=patLen*ordersLen;
   PRChannelSource src=prSourceFor(e,pr.chan);
   std::vector<PRNote> notes=prReadChannel(src);
+
+  // E7: roll -> tracker. selecting a note puts the tracker cursor on its first row and selects
+  // its rows in the pattern (within one order). not while playing: moving the order would jump.
+  auto syncTracker=[&](int startRow, int endRow) {
+    if (e->isPlaying() || startRow<0 || startRow>=totalRows) return;
+    int o=startRow/patLen, r=startRow%patLen;
+    setOrder((unsigned char)o);
+    cursor.xCoarse=pr.chan;
+    cursor.xFine=0;
+    cursor.y=r;
+    selStart=cursor;
+    selEnd=cursor;
+    int last=endRow-1;
+    if (last>startRow && last/patLen==o) selEnd.y=last%patLen;
+    updateScroll(r);
+    demandScrollX=true;
+    pr.seenOrd=o;
+    pr.seenRow=r;
+    pr.seenChan=pr.chan;
+  };
+  int trackerRow=(cursor.xCoarse==pr.chan)?(curOrder*patLen+cursor.y):-1;
 
   // drop selected starts that no longer exist (undo, tracker edits)
   for (auto it=pr.sel.begin(); it!=pr.sel.end();) {
@@ -1085,6 +1129,13 @@ void FurnaceGUI::drawPianoRoll() {
       if (fabsf(target-pr.scrollX)>0.5f) ImGui::SetScrollX(target);
     }
 
+    // E7: show the row the tracker cursor went to
+    if (pr.revealRow>=0) {
+      float rx=pr.revealRow*zX;
+      if (rx<pr.scrollX || rx>pr.scrollX+viewW-zX) ImGui::SetScrollX(MAX(0.0f,rx-viewW*0.33f));
+      pr.revealRow=-1;
+    }
+
     // center vertically on the channel's notes
     if (pr.centerPending && !notes.empty()) {
       int sum=0;
@@ -1291,6 +1342,7 @@ void FurnaceGUI::drawPianoRoll() {
           pr.sel.clear();
           pr.sel.insert(n.start);
         }
+        if (!io.KeyCtrl) syncTracker(n.start,n.end);
         pr.dragGrabStart=n.start;
         pr.dragGrabPitch=n.pitch;
         if (!io.KeyCtrl || pr.sel.count(n.start)) {
@@ -1629,6 +1681,23 @@ void FurnaceGUI::drawPianoRoll() {
           n.start/patLen,n.start%patLen,n.end/patLen,n.end%patLen,n.end-n.start,
           _("instrument"),(n.ins<0)?0:n.ins,n.insExplicit?"":_(" (inherited)"),
           _("ends by"),endName,portaTip.c_str());
+      }
+    }
+
+    // E7: tracker cursor in the roll: a thin line on its row and an outline on the note it is in
+    if (trackerRow>=0 && trackerRow>=firstRow && trackerRow<=lastRow) {
+      ImVec4 cv=uiColors[GUI_COLOR_PATTERN_CURSOR];
+      ImU32 colCur=ImGui::GetColorU32(ImVec4(cv.x,cv.y,cv.z,0.55f));
+      ImU32 colCurNote=ImGui::GetColorU32(ImVec4(cv.x*0.5f+0.5f,cv.y*0.5f+0.5f,cv.z*0.5f+0.5f,1.0f));
+      float cx=org.x+(trackerRow+0.5f)*zX;
+      dl->AddLine(ImVec2(cx,viewMin.y),ImVec2(cx,viewMax.y),colCur,1.0f*dpiScale);
+      for (const PRNote& n: notes) {
+        if (n.start>trackerRow || n.end<=trackerRow) continue;
+        int a=axisIndex[n.pitch];
+        if (a<0) break;
+        float y0=org.y+a*zY;
+        dl->AddRect(ImVec2(org.x+noteX0(n)-1,y0-1),ImVec2(org.x+noteX1(n)+1,y0+zY+1),colCurNote,2.0f*dpiScale,0,2.0f*dpiScale);
+        break;
       }
     }
 
@@ -2114,8 +2183,10 @@ void FurnaceGUI::drawPianoRoll() {
           if (noteThere) {
             pr.sel.insert(r);
             pr.focusRow=-1;
+            for (const PRNote& n: notes) if (n.start==r) syncTracker(n.start,n.end);
           } else {
             pr.focusRow=r;
+            syncTracker(r,r+1);
           }
         }
       }
