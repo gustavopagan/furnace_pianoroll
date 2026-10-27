@@ -23781,3 +23781,15 @@ msgstr "Tornar única nesta posição"
 #: src/gui/gui.cpp:4756
 msgid "piano roll"
 msgstr "piano roll"
+
+msgid "cut %d note(s)"
+msgstr "%d nota(s) recortada(s)"
+
+msgid "copied %d note(s); click the ruler where they go and press Ctrl+V"
+msgstr "%d nota(s) copiada(s); clique na régua onde elas vão e aperte Ctrl+V"
+
+msgid "nothing copied yet: select notes and press Ctrl+C"
+msgstr "nada copiado ainda: selecione notas e aperte Ctrl+C"
+
+msgid "pasted %d note(s) at %.2X:%.2X"
+msgstr "%d nota(s) colada(s) em %.2X:%.2X"

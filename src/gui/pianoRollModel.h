@@ -191,4 +191,26 @@ struct PRMove {
 // the carried value wins). what does not fit stays where it was and its row goes to *refused.
 bool prMoveNotes(PREditCtx& ctx, const std::vector<PRMove>& moves, int endMarker, std::vector<int>* refused);
 
+// ---------------- copy / paste ----------------
+
+// one copied note, relative to the first copied note.
+struct PRClipNote {
+  int rel, len, pitch, ins;  // ins -1: none known
+  int vol;                   // start-row volume, -1: none
+  std::vector<std::pair<int,int>> fx; // start-row effects (song effects left out), val -1 = none
+  int cutRel, cutVal;        // ECxx inside the note: row relative to the note start (-1: none)
+  PRClipNote(): rel(0), len(1), pitch(0), ins(-1), vol(-1), cutRel(-1), cutVal(0) {}
+};
+
+// builds the clipboard from notes of a channel (rows read with rowAt(absRow)).
+std::vector<PRClipNote> prCopyNotes(const std::vector<const PRNote*>& notes, int effectCols, const std::function<const short*(int absRow)>& rowAt);
+
+// pastes clip at absolute row `at`. notes of `existing` that start inside the pasted span
+// [at, at+span) are replaced (with their start-row volume and note effects); a note playing
+// into the span is cut by the first pasted note, as in any tracker edit. pasted notes get an
+// explicit instrument. notes past the end of the song are dropped. effects that find no free
+// column go to *refused (rows). *newStarts gets the start rows of the pasted notes.
+// returns false if nothing was changed.
+bool prPasteNotes(PREditCtx& ctx, const std::vector<PRNote>& existing, const std::vector<PRClipNote>& clip, int at, int endMarker, std::vector<int>* refused, std::vector<int>* newStarts);
+
 #endif

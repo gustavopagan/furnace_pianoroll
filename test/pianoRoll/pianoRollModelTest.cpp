@@ -862,6 +862,71 @@ int main() {
     CHECK(!prPrefsLoad(b,"/tmp/nao-existe-xyz.fur"));
   }
 
+  {
+    TEST("colar: melodia com volume e efeitos em outro ponto, mesmo canal");
+    FakeChan c(32,{0,1},2);
+    c.note(0,0,C4,1); c.row(0,0)[PR_COL_VOL]=0x40; c.fx(0,0,0,0x03,0x10); c.fx(0,0,1,0x0f,0x06);
+    c.note(0,2,C4+2,1); c.note(0,4,C4+4,2); c.fx(0,5,0,0xec,0x02); c.note(0,6,PR_PITCH_OFF);
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==3);
+    std::vector<const PRNote*> sel;
+    for (auto& x: n) sel.push_back(&x);
+    PREditCtx x=c.ctx();
+    auto clip=prCopyNotes(sel,2,x.get);
+    CHECK(clip.size()==3 && clip[0].rel==0 && clip[1].rel==2 && clip[2].rel==4);
+    CHECK(clip[0].vol==0x40 && clip[0].fx.size()==1 && clip[0].fx[0].first==0x03); // 0F fica de fora
+    CHECK(clip[2].cutRel==1 && clip[2].cutVal==2 && clip[2].len==2);
+    std::vector<int> ref, ns;
+    CHECK(prPasteNotes(x,n,clip,40,PR_PITCH_OFF,&ref,&ns));
+    CHECK(ref.empty());
+    CHECK(ns.size()==3 && ns[0]==40 && ns[2]==44);
+    auto m=prReadChannel(c.src());
+    CHECK(m.size()==6);
+    CHECK(m[3].start==40 && m[3].end==42 && m[3].pitch==C4 && m[3].ins==1);
+    CHECK(m[5].start==44 && m[5].end==46 && m[5].pitch==C4+4 && m[5].ins==2 && m[5].cutRow==45);
+    CHECK(c.row(1,8)[PR_COL_VOL]==0x40);
+    auto e40=prRowEffects(c.row(1,8),2);
+    CHECK(e40.size()==1 && e40[0].fx==0x03 && e40[0].val==0x10);
+    // original intacto
+    CHECK(c.row(0,0)[PR_COL_VOL]==0x40 && c.row(0,0)[PR_COL_FX(1)]==0x0f);
+  }
+  {
+    TEST("colar por cima: notas que começam no trecho são substituídas, a anterior é cortada");
+    FakeChan c(32,{0},1);
+    c.note(0,0,C4,1); c.note(0,8,C4+7,3); c.row(0,8)[PR_COL_VOL]=0x22; c.fx(0,8,0,0x04,0x44);
+    c.note(0,10,C4+9,3); c.note(0,16,PR_PITCH_OFF);
+    PREditCtx x=c.ctx();
+    auto n=prReadChannel(c.src());
+    CHECK(n.size()==3);
+    std::vector<PRClipNote> clip(1);
+    clip[0].rel=0; clip[0].len=4; clip[0].pitch=C4-12; clip[0].ins=5;
+    std::vector<int> ns;
+    CHECK(prPasteNotes(x,n,clip,6,PR_PITCH_OFF,NULL,&ns));
+    auto m=prReadChannel(c.src());
+    // C4 cortada em 6; nova em 6..10; a de 8 some com volume e 04; a de 10 continua
+    CHECK(m.size()==3);
+    CHECK(m[0].start==0 && m[0].end==6);
+    CHECK(m[1].start==6 && m[1].end==10 && m[1].pitch==C4-12 && m[1].ins==5);
+    CHECK(m[2].start==10 && m[2].pitch==C4+9);
+    CHECK(c.row(0,8)[PR_COL_VOL]==-1 && c.row(0,8)[PR_COL_FX(0)]==-1);
+  }
+  {
+    TEST("colar sem coluna livre: a linha é avisada; passando do fim da música, notas caem fora");
+    FakeChan c(16,{0},1);
+    c.fx(0,4,0,0x08,0x11);
+    PREditCtx x=c.ctx();
+    std::vector<PRClipNote> clip(2);
+    clip[0].rel=0; clip[0].len=2; clip[0].pitch=C4; clip[0].ins=0; clip[0].fx.push_back({0x03,0x20});
+    clip[1].rel=20; clip[1].len=2; clip[1].pitch=C4; clip[1].ins=0;
+    std::vector<int> ref, ns;
+    CHECK(prPasteNotes(x,{},clip,4,PR_PITCH_OFF,&ref,&ns));
+    CHECK(ref.size()==1 && ref[0]==4);
+    CHECK(ns.size()==1);
+    CHECK(c.row(0,4)[PR_COL_FX(0)]==0x08);
+    auto m=prReadChannel(c.src());
+    CHECK(m.size()==1 && m[0].start==4);
+  }
+
   printf("\n%d verificações, %d falhas\n",checks,fails);
   if (fails==0) printf("TODOS OS TESTES PASSARAM\n");
   return fails?1:0;

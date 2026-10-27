@@ -25,6 +25,7 @@ The executables are not code-signed. On Windows, click "More info" > "Run anyway
 - [The window, top to bottom](#the-window-top-to-bottom)
 - [Creating, moving and deleting notes](#creating-moving-and-deleting-notes)
 - [Selecting several notes](#selecting-several-notes)
+- [Copy and paste](#copy-and-paste)
 - [Changing the instrument](#changing-the-instrument)
 - [Repeated patterns](#repeated-patterns)
 - [Note panel and effects](#note-panel-and-effects)
@@ -64,6 +65,7 @@ The executables are not code-signed. On Windows, click "More info" > "Run anyway
 | Change length | drag the right edge |
 | Duplicate | Shift + drag (the copy lands next to the original, never on top of it) |
 | Delete | Delete key, or the Erase tool (click or drag over notes) |
+| Copy, cut, paste | Ctrl+C / Ctrl+X, then click the ruler where the notes go and press Ctrl+V (works across channels) |
 | Undo / redo | Ctrl+Z / Ctrl+Y (the tracker's own history) |
 
 ![draw](img/03-draw.png)
@@ -81,6 +83,10 @@ With Select, drag a rectangle on empty space. Ctrl+click adds or removes a note.
 ![selection rectangle](img/05-select.png)
 
 ![several selected](img/06-multi.png)
+
+## Copy and paste
+
+Select notes and press Ctrl+C (or Ctrl+X to cut). Click the ruler where the first note should go and press Ctrl+V. Without a marker, the notes go to the tracker cursor. You can switch the roll to another channel before pasting. Pasted notes keep their length, pitch, instrument, start-row volume and effects (song-wide effects are left out). Notes that start inside the pasted stretch are replaced; a note playing into it is cut, as in any tracker edit. The whole paste is one undo step, and repeated patterns are handled as in any other edit.
 
 ## Changing the instrument
 
@@ -196,6 +202,7 @@ With the button off, Furnace behaves like the original.
 | Ctrl+Shift+R | open the piano roll |
 | S / D / E | Select / Draw / Erase |
 | Delete | delete the selected notes |
+| Ctrl+C / Ctrl+X / Ctrl+V | copy / cut / paste at the marker |
 | Ctrl+A / Esc | select all / clear selection |
 | Shift + drag | duplicate |
 | Ctrl + click | add to or remove from the selection |

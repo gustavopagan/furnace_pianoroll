@@ -25,6 +25,7 @@ Os executáveis não são assinados. No Windows, clique em "Mais informações" 
 - [A janela, de cima para baixo](#a-janela-de-cima-para-baixo)
 - [Criar, mover e apagar notas](#criar-mover-e-apagar-notas)
 - [Selecionar várias notas](#selecionar-várias-notas)
+- [Copiar e colar](#copiar-e-colar)
 - [Trocar o instrumento](#trocar-o-instrumento)
 - [Pattern repetida](#pattern-repetida)
 - [Painel de nota e efeitos](#painel-de-nota-e-efeitos)
@@ -64,6 +65,7 @@ Menu `window` > `piano roll`, ou **Ctrl+Shift+R** (dá para trocar em Settings >
 | Mudar a duração | arraste a borda direita |
 | Duplicar | Shift + arrastar (a cópia vai para o lado da original, nunca por cima) |
 | Apagar | Delete, ou ferramenta Erase (clique ou arraste por cima) |
+| Copiar, recortar, colar | Ctrl+C / Ctrl+X, depois clique na régua onde as notas vão e aperte Ctrl+V (vale entre canais) |
 | Desfazer / refazer | Ctrl+Z / Ctrl+Y (o mesmo histórico do tracker) |
 
 ![desenhar](img/03-draw.png)
@@ -81,6 +83,10 @@ Com Select, arraste um retângulo em área vazia. Ctrl+clique soma ou tira uma n
 ![retângulo de seleção](img/05-select.png)
 
 ![várias selecionadas](img/06-multi.png)
+
+## Copiar e colar
+
+Selecione notas e aperte Ctrl+C (ou Ctrl+X para recortar). Clique na régua onde a primeira nota deve ficar e aperte Ctrl+V. Sem marcador, as notas vão para o cursor do tracker. Dá para trocar o canal do roll antes de colar. As notas coladas mantêm duração, altura, instrumento, volume e efeitos da linha inicial (efeitos que valem para a música inteira ficam de fora). Notas que começam dentro do trecho colado são substituídas; uma nota que vinha tocando é cortada, como em qualquer edição no tracker. A colagem inteira é um único Ctrl+Z, e pattern repetida é tratada como em qualquer outra edição.
 
 ## Trocar o instrumento
 
@@ -196,6 +202,7 @@ Com o botão desligado, o Furnace se comporta como o original.
 | Ctrl+Shift+R | abrir o piano roll |
 | S / D / E | Select / Draw / Erase |
 | Delete | apagar as selecionadas |
+| Ctrl+C / Ctrl+X / Ctrl+V | copiar / recortar / colar no marcador |
 | Ctrl+A / Esc | selecionar tudo / limpar a seleção |
 | Shift + arrastar | duplicar |
 | Ctrl + clique | somar ou tirar da seleção |

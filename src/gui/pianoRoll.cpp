@@ -111,6 +111,8 @@ struct FurnacePianoRoll {
   std::vector<int> pendRem;
   std::vector<PRNoteSpec> pendAdd;
   std::vector<int> pendSelect; // starts to select after the commit
+  // copy / paste (Ctrl+C, Ctrl+X, Ctrl+V)
+  std::vector<PRClipNote> clip;
   // E5/E6: any other edit (instrument, effects, volume) as a function on the channel.
   // it runs twice (dry run, then for real), so it must only depend on what it captured.
   std::function<bool(PREditCtx&)> pendOp;
@@ -856,6 +858,48 @@ void FurnaceGUI::drawPianoRoll() {
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A,false)) {
       pr.sel.clear();
       for (PRNote& n: notes) pr.sel.insert(n.start);
+    }
+    // copy / cut / paste. paste goes to the marker (click on the ruler), or to the tracker
+    // cursor when there is no marker, in the channel shown in the roll.
+    if (io.KeyCtrl && !io.KeyAlt && (ImGui::IsKeyPressed(ImGuiKey_C,false) || ImGui::IsKeyPressed(ImGuiKey_X,false)) && !pr.sel.empty()) {
+      std::vector<const PRNote*> cs;
+      for (const PRNote& n: notes) if (pr.sel.count(n.start)) cs.push_back(&n);
+      int fxc=MIN(DIV_MAX_EFFECTS,MAX(1,(int)sub->pat[pr.chan].effectCols));
+      pr.clip=prCopyNotes(cs,fxc,[&](int r) -> const short* { return src.rowAt(src.patAt(r/patLen),r%patLen); });
+      if (ImGui::IsKeyPressed(ImGuiKey_X,false)) {
+        pr.pendRem.assign(pr.sel.begin(),pr.sel.end());
+        pr.pendOp=nullptr;
+        pr.pendAdd.clear();
+        pr.pendSelect.clear();
+        pianoRollCommit();
+        if (!pr.repeatPopup) prSetStatus(pr,fmt::sprintf(_("cut %d note(s)"),(int)pr.clip.size()));
+      } else {
+        prSetStatus(pr,fmt::sprintf(_("copied %d note(s); click the ruler where they go and press Ctrl+V"),(int)pr.clip.size()));
+      }
+    }
+    if (io.KeyCtrl && !io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_V,false)) {
+      if (pr.clip.empty()) {
+        prSetStatus(pr,_("nothing copied yet: select notes and press Ctrl+C"));
+      } else {
+        int at=(pr.markerRow>=0)?pr.markerRow:(curOrder*patLen+cursor.y);
+        if (at<0 || at>=totalRows) at=0;
+        std::vector<PRNote> existing=notes;
+        std::vector<PRClipNote> clipCopy=pr.clip;
+        int endMarker=pr.prefs.get(pr.chan).endRel?PR_PITCH_REL:PR_PITCH_OFF;
+        std::vector<int> starts;
+        for (const PRClipNote& c: clipCopy) if (at+c.rel<totalRows) starts.push_back(at+c.rel);
+        FurnacePianoRoll* prp0=&pr;
+        pr.pendRem.clear();
+        pr.pendAdd.clear();
+        pr.pendSelect=starts;
+        pr.pendOp=[prp0,existing,clipCopy,at,endMarker](PREditCtx& c) -> bool {
+          return prPasteNotes(c,existing,clipCopy,at,endMarker,&prp0->pendRefused,NULL);
+        };
+        pianoRollCommit();
+        if (!pr.pendOp && !pr.repeatPopup && pr.pendRefused.empty()) {
+          prSetStatus(pr,fmt::sprintf(_("pasted %d note(s) at %.2X:%.2X"),(int)starts.size(),at/patLen,at%patLen));
+        }
+      }
     }
   }
 

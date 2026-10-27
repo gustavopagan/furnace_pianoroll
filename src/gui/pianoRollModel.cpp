@@ -19,6 +19,7 @@
 
 #include "pianoRollModel.h"
 #include <stddef.h>
+#include <algorithm>
 
 #define MIN_PR(a,b) (((a)<(b))?(a):(b))
 
@@ -587,6 +588,83 @@ bool prMoveNotes(PREditCtx& ctx, const std::vector<PRMove>& moves, int endMarker
         if (!ref.empty() && refused!=NULL) refused->push_back(last);
       }
     }
+  }
+  return changed;
+}
+
+// ---------------- copy / paste ----------------
+
+std::vector<PRClipNote> prCopyNotes(const std::vector<const PRNote*>& notesIn, int effectCols, const std::function<const short*(int absRow)>& rowAt) {
+  std::vector<const PRNote*> notes=notesIn;
+  std::sort(notes.begin(),notes.end(),[](const PRNote* a, const PRNote* b) { return a->start<b->start; });
+  std::vector<PRClipNote> ret;
+  if (notes.empty()) return ret;
+  int base=notes[0]->start;
+  for (const PRNote* n: notes) {
+    PRClipNote c;
+    c.rel=n->start-base;
+    c.len=std::max(1,n->end-n->start);
+    c.pitch=n->pitch;
+    c.ins=n->ins;
+    const short* row=rowAt(n->start);
+    c.vol=row[PR_COL_VOL];
+    for (const PRFx& f: prRowEffects(row,effectCols)) {
+      if (f.fx<0 || prIsSongEffect(f.fx)) continue;
+      c.fx.push_back(std::make_pair(f.fx,f.val));
+    }
+    if (n->cutRow>=0) {
+      c.cutRel=n->cutRow-n->start;
+      c.cutVal=n->cutTicks;
+    }
+    ret.push_back(c);
+  }
+  return ret;
+}
+
+bool prPasteNotes(PREditCtx& ctx, const std::vector<PRNote>& existing, const std::vector<PRClipNote>& clip, int at, int endMarker, std::vector<int>* refused, std::vector<int>* newStarts) {
+  if (clip.empty() || at<0 || at>=ctx.total) return false;
+  int span=0;
+  for (const PRClipNote& c: clip) span=std::max(span,c.rel+c.len);
+  int spanEnd=std::min(ctx.total,at+span);
+
+  // 1. notes starting inside the span go, with their start-row volume and note effects
+  std::vector<int> rem;
+  bool changed=false;
+  for (const PRNote& n: existing) {
+    if (n.start<at || n.start>=spanEnd) continue;
+    rem.push_back(n.start);
+    const short* row=ctx.get(n.start);
+    if (row[PR_COL_VOL]>=0) changed|=prSetVolume(ctx,{{n.start,-1}});
+    std::vector<int> fxs;
+    for (const PRFx& f: prRowEffects(ctx.get(n.start),ctx.effectCols)) {
+      if (f.fx>=0 && !prIsSongEffect(f.fx)) fxs.push_back(f.fx);
+    }
+    for (int f: fxs) changed|=prRemoveEffect(ctx,{n.start},f);
+    if (n.cutRow>=0 && n.cutRow<spanEnd) changed|=prRemoveEffect(ctx,{n.cutRow},0xec);
+  }
+
+  // 2. the notes
+  std::vector<PRNoteSpec> add;
+  for (const PRClipNote& c: clip) {
+    int s=at+c.rel;
+    if (s>=ctx.total) continue;
+    int e=std::min(ctx.total,s+c.len);
+    add.push_back(PRNoteSpec(s,e,c.pitch,c.ins));
+  }
+  if (add.empty() && rem.empty()) return changed;
+  changed|=prApplyEdit(ctx,rem,add,endMarker);
+
+  // 3. volume and effects
+  for (const PRClipNote& c: clip) {
+    int s=at+c.rel;
+    if (s>=ctx.total) continue;
+    if (newStarts) newStarts->push_back(s);
+    if (c.vol>=0) changed|=prSetVolume(ctx,{{s,c.vol}});
+    for (auto& f: c.fx) {
+      if (f.second<0) continue;
+      changed|=prSetEffect(ctx,{s},f.first,f.second,refused);
+    }
+    if (c.cutRel>=0 && s+c.cutRel<ctx.total) changed|=prSetEffect(ctx,{s+c.cutRel},0xec,c.cutVal,refused);
   }
   return changed;
 }
